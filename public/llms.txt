@@ -1,0 +1,27 @@
+# UnimiDoc
+
+> Piattaforma indipendente di appunti verificati per il corso di laurea in Scienze
+> Biologiche (L-13) all'Università degli Studi di Milano ("La Statale"). Gli studenti
+> caricano dispense, schemi, esercizi svolti e domande d'esame; la community li
+> verifica e li valuta. Ogni documento ha una scheda pubblica dedicata con materia,
+> docente, anno accademico, numero di pagine e valutazione.
+
+UnimiDoc non è affiliata con l'Università degli Studi di Milano.
+
+## Pagine principali
+
+- [Esplora appunti](https://unimidoc.it/app): catalogo filtrabile per materia e docente
+- [Premium](https://unimidoc.it/premium): anteprime complete e download senza attese
+- [Carica appunti](https://unimidoc.it/upload): upload con revisione e crediti di ricompensa
+
+## Schede documento
+
+Ogni documento vive su un URL proprio con schema
+`https://unimidoc.it/appunti/{materia}/{titolo}` e markup Schema.org
+LearningResource (materia, docente, ateneo, valutazioni, download).
+
+## Materie coperte
+
+Genetica, Microbiologia generale, Chimica biologica, Citologia e istologia,
+Fisiologia, Biologia cellulare, Anatomia umana e le altre materie del piano di
+studi L-13 della Statale di Milano.

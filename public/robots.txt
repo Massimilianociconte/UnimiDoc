@@ -1,0 +1,31 @@
+# UnimiDoc — appunti verificati per Scienze Biologiche, Statale di Milano
+# Le pagine pubbliche (landing, esplora, schede documento) sono indicizzabili.
+# Le aree riservate non hanno contenuto utile per i motori.
+
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /library
+Disallow: /libreria
+Disallow: /impostazioni
+Disallow: /settings
+Disallow: /login
+Disallow: /signup
+
+# Crawler AI (ChatGPT, Gemini, Claude, Perplexity): benvenuti sulle pagine pubbliche.
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+Sitemap: https://unimidoc.it/sitemap.xml

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UnimiDoc - Appunti verificati per Scienze Biologiche UniMi</title>
+    <meta
+      name="description"
+      content="Piattaforma indipendente per appunti, schemi e domande d'esame verificati per Scienze Biologiche all'Università degli Studi di Milano."
+    />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <meta name="theme-color" content="#16a34a" />
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+    <meta property="og:site_name" content="UnimiDoc" />
+    <meta property="og:locale" content="it_IT" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="UnimiDoc - Appunti verificati per Scienze Biologiche UniMi" />
+    <meta
+      property="og:description"
+      content="Appunti, schemi e domande d'esame verificati per Scienze Biologiche L-13 alla Statale di Milano."
+    />
+    <meta name="twitter:card" content="summary" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://unimidoc.it/#website",
+            "url": "https://unimidoc.it/",
+            "name": "UnimiDoc",
+            "description": "Appunti verificati per Scienze Biologiche L-13 all'Università degli Studi di Milano.",
+            "inLanguage": "it",
+            "potentialAction": {
+              "@type": "SearchAction",
+              "target": {
+                "@type": "EntryPoint",
+                "urlTemplate": "https://unimidoc.it/app?materia={search_term_string}"
+              },
+              "query-input": "required name=search_term_string"
+            }
+          },
+          {
+            "@type": "Organization",
+            "@id": "https://unimidoc.it/#organization",
+            "name": "UnimiDoc",
+            "url": "https://unimidoc.it/",
+            "description": "Piattaforma indipendente di appunti verificati per gli studenti di Scienze Biologiche della Statale di Milano. Non affiliata con l'Università degli Studi di Milano.",
+            "knowsAbout": [
+              "Scienze Biologiche L-13",
+              "Università degli Studi di Milano",
+              "Genetica",
+              "Microbiologia",
+              "Chimica biologica",
+              "Citologia e istologia",
+              "appunti universitari",
+              "dispense",
+              "flashcard"
+            ],
+            "audience": {
+              "@type": "EducationalAudience",
+              "educationalRole": "student"
+            }
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
