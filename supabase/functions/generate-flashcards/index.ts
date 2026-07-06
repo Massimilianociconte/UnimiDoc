@@ -80,12 +80,17 @@ function sanitizeCards(cards: GeneratedCard[], max: number): GeneratedCard[] {
     const maxCards = Math.min(Number(body.maxCards ?? 12) || 12, config.limits.maxCardsPerGeneration)
     const pageStart = body.pageStart ?? null
     const pageEnd = body.pageEnd ?? null
+    const visibility = String(body.visibility ?? 'private').toLowerCase()
+    const cacheScope = visibility === 'public' ? 'public' : `user:${userId}`
+    const documentScope = body.documentId ? String(body.documentId).slice(0, 128) : 'no-document'
 
     const key = await cacheKey([
       'deepseek',
       config.deepseek.model,
       config.promptVersions.flashcards,
       'flashcards',
+      cacheScope,
+      documentScope,
       language,
       maxCards,
       chunkText,

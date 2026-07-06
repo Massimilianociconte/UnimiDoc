@@ -119,7 +119,7 @@ export type CompressionResult = {
 const OCR_TEXT_THRESHOLD = 24
 const LOW_TEXT_THRESHOLD = 120
 const MAX_RANK_CANDIDATES = 600
-const MAX_RENDERED_PAGES = 14
+const MAX_RENDERED_PAGES = 28
 
 function toUint8(buffer: ArrayBuffer): Uint8Array {
   return new Uint8Array(buffer.slice(0))

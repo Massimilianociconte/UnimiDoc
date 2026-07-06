@@ -108,7 +108,14 @@ import type {
 } from './lib/pdfProcessing'
 import { calculateNextReview, evaluateTextAnswer, type AnswerStatus, type SrsRating, type SrsState } from './lib/studyEngine'
 import { getPremiumState, refreshPremiumState, setPremiumState } from './lib/entitlements'
-import { autoDetectOcclusion, requestAiHelp, setAccessTokenProvider, type AiHelpMode } from './lib/aiClient'
+import {
+  autoDetectOcclusion,
+  generatePremiumFlashcards as generateBackendPremiumFlashcards,
+  requestAiHelp,
+  setAccessTokenProvider,
+  type AiHelpMode,
+  type PremiumGeneratedFlashcard,
+} from './lib/aiClient'
 import { buildUserDashboardData, loadDashboardLiveOverlay, type DashboardLiveOverlay } from './userDashboardData'
 import { creditsToEur, creditTier, documentCreditPrice, revenueSplit, tierLabel, TOPUP_PACKS, WELCOME_CREDITS } from './lib/creditPricing'
 import { moderatePublicText } from './lib/contentModeration'
@@ -2099,6 +2106,184 @@ const flashcardSourceLabels: Record<Flashcard['source'], string> = {
   classificazione: 'Classificazione',
 }
 
+type PremiumFlashcardChunk = {
+  text: string
+  pageStart: number
+  pageEnd: number
+  section: string | null
+  score: number
+}
+
+const AI_CHUNK_TARGET_CHARS = 5200
+const AI_CHUNK_MAX_CHARS = 7600
+const AI_CARDS_PER_CHUNK = 8
+const AI_MAX_CHUNKS_PER_DOCUMENT = 6
+const AI_LOW_VALUE_SECTION =
+  /\b(indice|bibliografia|references|sitografia|copyright|ringraziamenti|licenza|appendice|crediti|programma del corso)\b/i
+const AI_TECHNICAL_SIGNAL =
+  /\b(DNA|RNA|ATP|enzim|gene|cellul|prote|membran|metabol|cromosom|sequenz|recettor|tessut|organo|mitosi|meiosi|batter|virus|fisiolog|anatom|farmac|immun|ecolog|evoluz|biochim|molecol|formula|gradiente|omeostas|trascrizion|traduzion)\b/i
+
+function normalizeAiText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function scoreTextForAiFlashcards(text: string): number {
+  const clean = normalizeAiText(text)
+  let score = Math.min(2.4, clean.length / 1200)
+  if (AI_TECHNICAL_SIGNAL.test(clean)) score += 2.2
+  if (/\b(è|sono|si definisce|viene definito|rappresenta|indica|costituisce|consiste)\b/i.test(clean)) score += 1.4
+  if (/\b(causa|provoca|determina|induce|favorisce|inibisce|porta a|dipende da|regola)\b/i.test(clean)) score += 1.4
+  if (/\b(fase|fasi|prima|poi|successivamente|infine|processo|meccanismo|ciclo|pathway|via)\b/i.test(clean)) score += 1.2
+  if (/\b(differenza|rispetto a|mentre|invece|al contrario|confronto|diverso da)\b/i.test(clean)) score += 1.1
+  if (/\b(si distinguono in|si classificano in|comprendono|include|sono costituiti da|sono composti da)\b/i.test(clean)) score += 1
+  if (AI_LOW_VALUE_SECTION.test(clean)) score -= 3
+  return Math.max(0, score)
+}
+
+function isUsefulAiSentence(sentence: DocSentence): boolean {
+  const text = normalizeAiText(sentence.text)
+  if (text.length < 45 || text.length > 780) return false
+  if (AI_LOW_VALUE_SECTION.test(sentence.section ?? '') || AI_LOW_VALUE_SECTION.test(text)) return false
+  if (/^(figura|tabella|slide|pagina)\s+\d+/i.test(text)) return false
+  return scoreTextForAiFlashcards(text) >= 1.1
+}
+
+function buildPremiumFlashcardChunks(analysis: PdfAnalysis, maxCards: number): PremiumFlashcardChunk[] {
+  const selected = analysis.sentences.filter(isUsefulAiSentence)
+  const chunks: PremiumFlashcardChunk[] = []
+  let current: DocSentence[] = []
+  let currentSection: string | null = null
+  let currentChars = 0
+
+  const flush = () => {
+    if (!current.length) return
+    const text = current.map((sentence) => `[p. ${sentence.page}] ${sentence.text}`).join('\n')
+    chunks.push({
+      text,
+      pageStart: Math.min(...current.map((sentence) => sentence.page)),
+      pageEnd: Math.max(...current.map((sentence) => sentence.page)),
+      section: currentSection,
+      score: scoreTextForAiFlashcards(text),
+    })
+    current = []
+    currentSection = null
+    currentChars = 0
+  }
+
+  for (const sentence of selected) {
+    const section = sentence.section ?? null
+    const lineLength = sentence.text.length + 12
+    const sectionChanged = current.length > 0 && section && currentSection && section !== currentSection
+    const tooLarge = currentChars + lineLength > AI_CHUNK_MAX_CHARS
+    const healthyBreak = currentChars >= AI_CHUNK_TARGET_CHARS && (sectionChanged || sentence.page !== current[current.length - 1]?.page)
+    if (tooLarge || healthyBreak) flush()
+    current.push(sentence)
+    currentSection = currentSection ?? section
+    currentChars += lineLength
+  }
+  flush()
+
+  const maxChunks = Math.min(AI_MAX_CHUNKS_PER_DOCUMENT, Math.max(1, Math.ceil(maxCards / AI_CARDS_PER_CHUNK)))
+  return chunks
+    .filter((chunk) => chunk.text.length >= 180 && chunk.score >= 1.4)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxChunks)
+}
+
+function sourceForPremiumCard(card: PremiumGeneratedFlashcard): Flashcard['source'] {
+  if (card.type === 'definition') return 'definizione'
+  if (card.type === 'cloze') return 'cloze'
+  if (card.type === 'comparison') return 'confronto'
+  const text = `${card.question ?? ''} ${card.answer ?? ''}`.toLowerCase()
+  if (/\b(causa|effetto|perché|determina|provoca|inibisce|favorisce)\b/i.test(text)) return 'causa'
+  if (/\b(fase|processo|meccanismo|sequenza|ciclo|prima|successivamente)\b/i.test(text)) return 'processo'
+  if (/\b(classifica|categorie|tipi|gruppi|comprende)\b/i.test(text)) return 'classificazione'
+  return 'concetto'
+}
+
+function findPremiumSourceRef(
+  analysis: PdfAnalysis,
+  chunk: PremiumFlashcardChunk,
+  card: PremiumGeneratedFlashcard,
+): Flashcard['ref'] {
+  const quote = normalizeAiText(card.source_quote ?? '')
+  const page = Math.max(1, Number(card.page_start ?? chunk.pageStart) || chunk.pageStart)
+  const match = quote
+    ? analysis.sentences.find((sentence) => {
+        const source = normalizeAiText(sentence.text)
+        return source.includes(quote.slice(0, 90)) || quote.includes(source.slice(0, 90))
+      })
+    : undefined
+  return {
+    page: match?.page ?? page,
+    sentenceIndex: match?.index ?? -1,
+    text: quote || chunk.text.slice(0, 260),
+    section: match?.section ?? chunk.section,
+  }
+}
+
+function dedupePremiumFlashcards(cards: Flashcard[]): Flashcard[] {
+  const seen = new Set<string>()
+  return cards.filter((card) => {
+    const key = `${normalizeAiText(card.front).toLowerCase()}\n${normalizeAiText(card.back).toLowerCase()}`.slice(0, 360)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function mapPremiumGeneratedCard(
+  analysis: PdfAnalysis,
+  chunk: PremiumFlashcardChunk,
+  card: PremiumGeneratedFlashcard,
+  index: number,
+): Flashcard | null {
+  const front = normalizeAiText(card.type === 'cloze' && card.cloze_text ? card.cloze_text : card.question ?? '')
+  const back = normalizeAiText(card.answer ?? '')
+  if (front.length < 6 || back.length < 2) return null
+  return {
+    id: `ai-premium-${Date.now()}-${chunk.pageStart}-${index}`,
+    front: front.slice(0, 420),
+    back: back.slice(0, 900),
+    source: sourceForPremiumCard(card),
+    score: card.difficulty === 'hard' ? 0.94 : card.difficulty === 'easy' ? 0.86 : 0.9,
+    ref: findPremiumSourceRef(analysis, chunk, card),
+  }
+}
+
+async function generatePremiumDeckFromBackend(
+  analysis: PdfAnalysis,
+  onProgress?: (done: number, total: number) => void,
+): Promise<Flashcard[]> {
+  const maxCards = flashcardLimitFor(true)
+  const chunks = buildPremiumFlashcardChunks(analysis, maxCards)
+  if (!chunks.length) return []
+
+  const cards: Flashcard[] = []
+  for (let index = 0; index < chunks.length && cards.length < maxCards; index += 1) {
+    const chunk = chunks[index]
+    onProgress?.(index, chunks.length)
+    const remaining = maxCards - cards.length
+    const response = await generateBackendPremiumFlashcards({
+      chunkText: chunk.text,
+      language: analysis.language,
+      maxCards: Math.min(AI_CARDS_PER_CHUNK, remaining),
+      pageStart: chunk.pageStart,
+      pageEnd: chunk.pageEnd,
+    })
+    if (!response.ok) {
+      throw new Error(response.message)
+    }
+    const mapped = response.data.flashcards
+      .map((card, cardIndex) => mapPremiumGeneratedCard(analysis, chunk, card, index * AI_CARDS_PER_CHUNK + cardIndex))
+      .filter((card): card is Flashcard => Boolean(card))
+    cards.push(...mapped)
+    onProgress?.(index + 1, chunks.length)
+  }
+
+  return dedupePremiumFlashcards(cards).slice(0, maxCards)
+}
+
 function PipelineIcon({ status }: { status: PipelineStatus }) {
   if (status === 'running') return <Loader2 className="spin" size={16} />
   if (status === 'done') return <Check size={16} />
@@ -3034,7 +3219,7 @@ function ImageOcclusionLab({ analysis, premium }: { analysis?: PdfAnalysis | nul
 
   const runAiAssist = async () => {
     if (!premium) {
-      setNotice('Auto-detect è Premium: il vision backend (Gemini) propone label e coordinate senza esporre chiavi nel frontend.')
+      setNotice('Auto-detect è Premium: il vision backend propone label e coordinate senza esporre chiavi nel frontend.')
       return
     }
     if (aiBusy) return
@@ -4075,7 +4260,7 @@ function UploadPage({
         })
       }
 
-      const { analyzePdf, compressPdfLossless, generateFlashcards, buildDocumentInsights } = await import('./lib/pdfProcessing')
+      const { analyzePdf, compressPdfLossless, buildDocumentInsights } = await import('./lib/pdfProcessing')
 
       let info = await analyzePdf(buffer)
       setAnalysis(info)
@@ -4137,20 +4322,33 @@ function UploadPage({
         if (!premium) {
           skipFreeFlashcards()
         } else {
-        patchStep('flashcards', {
-          status: 'running',
-          detail: 'Selezione concetti e quality gate Premium…',
-        })
-        const generated = generateFlashcards(info, { max: flashcardLimitFor(true), premium: true })
-        setCards(generated)
-        setReviewCardIndex(0)
-        setApprovedCardIds(new Set())
-        patchStep('flashcards', {
-          status: generated.length ? 'done' : 'skipped',
-          detail: generated.length
-            ? `${generated.length} flashcard Premium pronte per revisione`
-            : 'Testo insufficiente per flashcard di qualità',
-        })
+          patchStep('flashcards', {
+            status: 'running',
+            detail: 'Generazione AI Premium sui chunk migliori…',
+          })
+          try {
+            const generated = await generatePremiumDeckFromBackend(info, (done, total) => {
+              patchStep('flashcards', {
+                status: 'running',
+                detail: `Generazione AI Premium · batch ${Math.min(done + 1, total)}/${total}`,
+              })
+            })
+            setCards(generated)
+            setReviewCardIndex(0)
+            setApprovedCardIds(new Set())
+            patchStep('flashcards', {
+              status: generated.length ? 'done' : 'skipped',
+              detail: generated.length
+                ? `${generated.length} flashcard AI Premium pronte per revisione`
+                : 'Testo insufficiente per flashcard AI di qualità',
+            })
+          } catch (error) {
+            setCards([])
+            patchStep('flashcards', {
+              status: 'error',
+              detail: error instanceof Error ? error.message : 'Generazione AI non riuscita',
+            })
+          }
         }
       }
 
@@ -4190,17 +4388,32 @@ function UploadPage({
       return
     }
     setRebuilding(true)
-    import('./lib/pdfProcessing').then(({ generateFlashcards }) => {
-      const generated = generateFlashcards(analysis, { max: flashcardLimitFor(true), premium: true })
-      setCards(generated)
-      setReviewCardIndex(0)
-      setApprovedCardIds(new Set())
+    patchStep('flashcards', { status: 'running', detail: 'Rigenerazione AI Premium…' })
+    generatePremiumDeckFromBackend(analysis, (done, total) => {
       patchStep('flashcards', {
-        status: generated.length ? 'done' : 'skipped',
-        detail: generated.length ? `${generated.length} flashcard Premium rigenerate` : 'Testo insufficiente',
+        status: 'running',
+        detail: `Rigenerazione AI Premium · batch ${Math.min(done + 1, total)}/${total}`,
       })
-      setRebuilding(false)
     })
+      .then((generated) => {
+        setCards(generated)
+        setReviewCardIndex(0)
+        setApprovedCardIds(new Set())
+        patchStep('flashcards', {
+          status: generated.length ? 'done' : 'skipped',
+          detail: generated.length ? `${generated.length} flashcard AI Premium rigenerate` : 'Testo insufficiente',
+        })
+      })
+      .catch((error) => {
+        setCards([])
+        patchStep('flashcards', {
+          status: 'error',
+          detail: error instanceof Error ? error.message : 'Rigenerazione AI non riuscita',
+        })
+      })
+      .finally(() => {
+        setRebuilding(false)
+      })
   }
 
   const changeMode = (nextPremium: boolean) => {
@@ -4211,18 +4424,32 @@ function UploadPage({
         skipFreeFlashcards()
       } else {
         setRebuilding(true)
-        patchStep('flashcards', { status: 'running', detail: 'Selezione concetti e quality gate Premium…' })
-        import('./lib/pdfProcessing').then(({ generateFlashcards }) => {
-          const generated = generateFlashcards(analysis, { max: flashcardLimitFor(true), premium: true })
-          setCards(generated)
-          setReviewCardIndex(0)
-          setApprovedCardIds(new Set())
+        patchStep('flashcards', { status: 'running', detail: 'Generazione AI Premium…' })
+        generatePremiumDeckFromBackend(analysis, (done, total) => {
           patchStep('flashcards', {
-            status: generated.length ? 'done' : 'skipped',
-            detail: generated.length ? `${generated.length} flashcard Premium pronte` : 'Testo insufficiente',
+            status: 'running',
+            detail: `Generazione AI Premium · batch ${Math.min(done + 1, total)}/${total}`,
           })
-          setRebuilding(false)
         })
+          .then((generated) => {
+            setCards(generated)
+            setReviewCardIndex(0)
+            setApprovedCardIds(new Set())
+            patchStep('flashcards', {
+              status: generated.length ? 'done' : 'skipped',
+              detail: generated.length ? `${generated.length} flashcard AI Premium pronte` : 'Testo insufficiente',
+            })
+          })
+          .catch((error) => {
+            setCards([])
+            patchStep('flashcards', {
+              status: 'error',
+              detail: error instanceof Error ? error.message : 'Generazione AI non riuscita',
+            })
+          })
+          .finally(() => {
+            setRebuilding(false)
+          })
       }
     }
   }

@@ -6,6 +6,7 @@
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+const FUNCTIONS_BASE_URL = (import.meta.env.VITE_SUPABASE_FUNCTIONS_URL as string | undefined) ?? '/api/functions'
 
 export function isBackendConfigured(): boolean {
   return Boolean(SUPABASE_URL)
@@ -33,7 +34,8 @@ async function callFunction<T>(name: string, payload: unknown): Promise<AiClient
     return { ok: false, code: 'login_required', message: 'Accedi per usare le funzioni AI Premium.' }
   }
   try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+    const functionUrl = `${FUNCTIONS_BASE_URL.replace(/\/$/, '')}/${name}`
+    const res = await fetch(functionUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -45,7 +47,7 @@ async function callFunction<T>(name: string, payload: unknown): Promise<AiClient
     const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } } & T
     if (res.ok) return { ok: true, data: json as T }
     const code: AiClientError['code'] =
-      res.status === 402 ? 'premium_required' : res.status === 429 ? 'rate_limited' : 'error'
+      res.status === 401 ? 'login_required' : res.status === 402 ? 'premium_required' : res.status === 429 ? 'rate_limited' : 'error'
     return { ok: false, code, message: json?.error?.message ?? `Errore ${res.status}` }
   } catch (error) {
     return { ok: false, code: 'error', message: error instanceof Error ? error.message : 'Errore di rete' }
@@ -53,6 +55,18 @@ async function callFunction<T>(name: string, payload: unknown): Promise<AiClient
 }
 
 export type AiHelpMode = 'explain' | 'followup' | 'example' | 'memo' | 'visualize'
+
+export type PremiumGeneratedFlashcard = {
+  type?: 'qa' | 'cloze' | 'definition' | 'comparison' | 'reasoning' | 'application'
+  question?: string
+  answer?: string
+  cloze_text?: string | null
+  difficulty?: 'easy' | 'medium' | 'hard'
+  source_quote?: string
+  page_start?: number | null
+  page_end?: number | null
+  tags?: string[]
+}
 
 export function requestAiHelp(payload: {
   mode: AiHelpMode
@@ -77,7 +91,7 @@ export function generatePremiumFlashcards(payload: {
   documentId?: string
   pageStart?: number
   pageEnd?: number
-}): Promise<AiClientResult<{ flashcards: unknown[]; cached: boolean }>> {
+}): Promise<AiClientResult<{ flashcards: PremiumGeneratedFlashcard[]; cached: boolean; premium?: boolean }>> {
   return callFunction('generate-flashcards', payload)
 }
 
