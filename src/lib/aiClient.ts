@@ -6,7 +6,13 @@
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
-const FUNCTIONS_BASE_URL = (import.meta.env.VITE_SUPABASE_FUNCTIONS_URL as string | undefined) ?? '/api/functions'
+// Prefer calling Supabase Edge Functions directly (CSP connect-src already
+// allows *.supabase.co) so the app never depends on a host-specific proxy
+// (`/api/functions/*`), which 404s on deploys where the proxy isn't wired.
+// An explicit VITE_SUPABASE_FUNCTIONS_URL still wins for custom setups.
+const FUNCTIONS_BASE_URL =
+  (import.meta.env.VITE_SUPABASE_FUNCTIONS_URL as string | undefined) ??
+  (SUPABASE_URL ? `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1` : '/api/functions')
 
 export function isBackendConfigured(): boolean {
   return Boolean(SUPABASE_URL)
