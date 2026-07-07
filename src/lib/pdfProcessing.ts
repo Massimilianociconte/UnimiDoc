@@ -1,8 +1,5 @@
-import * as pdfjsLib from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { PDFDocument } from 'pdf-lib'
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+import { getPdfDocumentParams, pdfjsLib } from './pdfjsConfig'
 
 export type FlashcardSource =
   | 'definizione'
@@ -50,13 +47,28 @@ export type PageAnalysis = {
   textDensity?: number
 }
 
+export type DocumentHeadingSource = 'bookmark' | 'layout' | 'section' | 'topic' | 'page' | 'ocr' | 'llm_validation'
+
 export type DocumentHeading = {
   id: string
   title: string
   page: number
+  pageEnd?: number
   level: 1 | 2 | 3
   score: number
-  source: 'layout' | 'section' | 'topic' | 'page'
+  source: DocumentHeadingSource
+  sources?: DocumentHeadingSource[]
+  parentId?: string | null
+  ordinal?: number
+  evidence?: string
+}
+
+export type DocumentOutlineMeta = {
+  strategy: 'native' | 'layout' | 'section' | 'page' | 'hybrid'
+  confidence: number
+  candidateCount: number
+  aiRecommended: boolean
+  reasons: string[]
 }
 
 export type RenderedPdfPage = {
@@ -103,6 +115,8 @@ export type PdfAnalysis = {
   sentences: DocSentence[]
   language: 'it' | 'en'
   outline?: DocumentHeading[]
+  outlineCandidates?: DocumentHeading[]
+  outlineMeta?: DocumentOutlineMeta
   renderedPages?: RenderedPdfPage[]
   review?: DocumentReview
 }
@@ -133,6 +147,35 @@ type SentenceCandidate = {
   text: string
   section: string | null
   kind: DocSentence['kind']
+}
+
+type TextLayoutLine = {
+  id: string
+  page: number
+  text: string
+  xStart: number
+  xEnd: number
+  y: number
+  topRatio: number
+  centerOffset: number
+  fontSize: number
+  maxFontSize: number
+  boldRatio: number
+  itemCount: number
+}
+
+type OutlineBuildInput = {
+  pageTexts: Array<{ page: number; text: string }>
+  sentences: DocSentence[]
+  pageCount: number
+  nativeOutline?: DocumentHeading[]
+  layoutLines?: TextLayoutLine[]
+}
+
+type OutlineBuildResult = {
+  outline: DocumentHeading[]
+  candidates: DocumentHeading[]
+  meta: DocumentOutlineMeta
 }
 
 const HYphenATED_LINE_BREAK = /(\p{L})-\s*\n\s*(\p{Ll})/gu
@@ -184,6 +227,57 @@ function isLikelyHeading(line: string): boolean {
   return startsNumbered || upper / Math.max(1, letters) > 0.45 || titleCase
 }
 
+function median(values: number[]): number {
+  const clean = values.filter((value) => Number.isFinite(value) && value > 0).sort((a, b) => a - b)
+  if (!clean.length) return 0
+  const mid = Math.floor(clean.length / 2)
+  return clean.length % 2 ? clean[mid] : (clean[mid - 1] + clean[mid]) / 2
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value))
+}
+
+function normalizeOutlineKey(value: string): string {
+  return normalizeInlineText(value)
+    .toLowerCase()
+    .replace(/^\d+(?:\.\d+)*\s+/, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+const OUTLINE_NOISE_TERMS =
+  /\b(indice|table of contents|bibliografia|references|sitografia|copyright|creative commons|licenza|ringraziamenti|crediti|programma del corso)\b/i
+const OUTLINE_STRONG_PATTERN =
+  /^(?:capitolo|chapter|lezione|lecture|parte|part|sezione|section|unit[aà]|modulo|module)\b|^\d+(?:\.\d+){0,3}\s+\S|^[IVXLCDM]+\.\s+\S/i
+
+function isOutlineNoiseTitle(line: string): boolean {
+  const clean = normalizeInlineText(line)
+  if (!clean) return true
+  if (isNoiseLine(clean)) return true
+  if (clean.includes('.....') || /\.{3,}\s*\d+$/.test(clean)) return true
+  if (OUTLINE_NOISE_TERMS.test(clean) && clean.split(/\s+/).length <= 8) return true
+  if (/^(?:figura|tabella|slide|pagina)\s+\d+/i.test(clean)) return true
+  return false
+}
+
+function sanitizeOutlineTitle(value: string, fallback = 'Sezione'): string {
+  const clean = normalizeInlineText(value)
+    .replace(/^[•*–-]\s+/, '')
+    .replace(/\s+\.{2,}\s*\d+$/, '')
+    .replace(/[.:;,\s]+$/, '')
+  if (!clean) return fallback
+  const words = clean.split(/\s+/).filter(Boolean)
+  if (words.length <= 12 && clean.length <= 96) return clean
+  return `${words.slice(0, 11).join(' ')}…`
+}
+
+function titleCaseRatio(words: string[]): number {
+  if (!words.length) return 0
+  return words.filter((word) => /^\p{Lu}/u.test(word)).length / words.length
+}
+
 function cleanPageText(rawText: string): string {
   const normalized = normalizePdfText(rawText)
   const lines = normalized
@@ -192,6 +286,93 @@ function cleanPageText(rawText: string): string {
     .filter((line) => !isNoiseLine(line))
 
   return lines.join('\n').trim()
+}
+
+function extractTextArtifacts(
+  // pdf.js TextContent shape is intentionally structural here to keep tests
+  // independent from the browser/pdf.js runtime.
+  content: {
+    items?: unknown[]
+    styles?: Record<string, { fontFamily?: string; fontSubstitution?: string }>
+  },
+  pageNumber: number,
+  viewport: { width: number; height: number },
+): { rawText: string; layoutLines: TextLayoutLine[] } {
+  const items = (content.items ?? []).filter((item): item is {
+    str: string
+    hasEOL?: boolean
+    transform?: number[]
+    width?: number
+    height?: number
+    fontName?: string
+  } => typeof item === 'object' && item !== null && 'str' in item && typeof (item as { str?: unknown }).str === 'string')
+
+  const rawText = items.map((item) => `${item.str}${item.hasEOL ? '\n' : ' '}`).join('')
+  const layoutLines: TextLayoutLine[] = []
+  let lineItems: typeof items = []
+
+  const flush = () => {
+    if (!lineItems.length) return
+    const text = normalizeInlineText(lineItems.map((item) => item.str).join(' '))
+    if (text && !isNoiseLine(text)) {
+      const metrics = lineItems.map((item) => {
+        const transform = item.transform ?? []
+        const x = Number(transform[4] ?? 0)
+        const y = Number(transform[5] ?? 0)
+        const size = Math.max(
+          Number(item.height ?? 0),
+          Math.hypot(Number(transform[2] ?? 0), Number(transform[3] ?? 0)),
+          Math.hypot(Number(transform[0] ?? 0), Number(transform[1] ?? 0)),
+          1,
+        )
+        const width = Math.max(Number(item.width ?? 0), item.str.length * size * 0.45)
+        const style = item.fontName ? content.styles?.[item.fontName] : undefined
+        const fontLabel = `${item.fontName ?? ''} ${style?.fontFamily ?? ''} ${style?.fontSubstitution ?? ''}`
+        return {
+          x,
+          y,
+          width,
+          size,
+          bold: /bold|black|semibold|demi/i.test(fontLabel),
+        }
+      })
+      const xStart = Math.min(...metrics.map((item) => item.x))
+      const xEnd = Math.max(...metrics.map((item) => item.x + item.width))
+      const y = metrics.reduce((sum, item) => sum + item.y, 0) / metrics.length
+      const fontSize = metrics.reduce((sum, item) => sum + item.size, 0) / metrics.length
+      const maxFontSize = Math.max(...metrics.map((item) => item.size))
+      const boldRatio = metrics.filter((item) => item.bold).length / Math.max(1, metrics.length)
+      const center = (xStart + xEnd) / 2
+      layoutLines.push({
+        id: `line-${pageNumber}-${layoutLines.length}-${hashForId(text)}`,
+        page: pageNumber,
+        text,
+        xStart,
+        xEnd,
+        y,
+        topRatio: clamp01(1 - (y + maxFontSize) / Math.max(1, viewport.height)),
+        centerOffset: Math.abs(center / Math.max(1, viewport.width) - 0.5),
+        fontSize,
+        maxFontSize,
+        boldRatio,
+        itemCount: lineItems.length,
+      })
+    }
+    lineItems = []
+  }
+
+  for (const item of items) {
+    const previous = lineItems[lineItems.length - 1]
+    const currentY = Number(item.transform?.[5] ?? 0)
+    const previousY = Number(previous?.transform?.[5] ?? currentY)
+    const currentSize = Math.max(Number(item.height ?? 0), Math.hypot(Number(item.transform?.[2] ?? 0), Number(item.transform?.[3] ?? 0)), 1)
+    if (lineItems.length && Math.abs(currentY - previousY) > Math.max(3, currentSize * 0.7)) flush()
+    lineItems.push(item)
+    if (item.hasEOL) flush()
+  }
+  flush()
+
+  return { rawText, layoutLines }
 }
 
 function splitSentenceChunk(text: string): string[] {
@@ -249,15 +430,17 @@ function pageHeadings(pageText: string, page: number): DocumentHeading[] {
   return pageText
     .split('\n')
     .map((line) => normalizeInlineText(line))
-    .filter((line) => line && isLikelyHeading(line) && !LOW_VALUE_TERMS.test(line))
+    .filter((line) => line && isLikelyHeading(line) && !isOutlineNoiseTitle(line))
     .slice(0, 8)
     .map((title, index) => ({
       id: `heading-${page}-${index}-${hashForId(title)}`,
-      title: title.replace(/^\d+(?:\.\d+)*\s+/, ''),
+      title: sanitizeOutlineTitle(title),
       page,
       level: headingLevelFor(title),
       score: headingScore(title),
       source: 'layout' as const,
+      sources: ['layout' as const],
+      evidence: title,
     }))
 }
 
@@ -270,35 +453,84 @@ function hashForId(value: string): string {
 }
 
 function compactTitle(value: string, fallback: string): string {
-  const clean = normalizeInlineText(value)
-    .replace(/^[•*–-]\s+/, '')
-    .replace(/^\d+[.)]\s+/, '')
-    .replace(/[.:;,\s]+$/, '')
-  if (!clean) return fallback
-  const words = clean.split(/\s+/).filter(Boolean)
-  if (words.length <= 9 && clean.length <= 74) return clean
-  return `${words.slice(0, 8).join(' ')}…`
+  return sanitizeOutlineTitle(value.replace(/^\d+[.)]\s+/, ''), fallback)
 }
 
-function buildDocumentOutline(pageTexts: Array<{ page: number; text: string }>, sentences: DocSentence[]): DocumentHeading[] {
-  const headings = pageTexts.flatMap(({ page, text }) => pageHeadings(text, page))
-  const seen = new Set<string>()
-  const uniqueHeadings = headings.filter((heading) => {
-    const key = `${heading.page}-${heading.title.toLowerCase()}`
-    if (seen.has(key)) return false
-    seen.add(key)
-    return heading.score >= 0.35
-  })
+function layoutHeadingLevel(line: TextLayoutLine, fontRatio: number): 1 | 2 | 3 {
+  const clean = normalizeInlineText(line.text)
+  const numbered = clean.match(/^(\d+(?:\.\d+){0,3})\s+\S/u)
+  if (numbered?.[1]) return Math.min(3, numbered[1].split('.').length) as 1 | 2 | 3
+  if (/^(?:capitolo|chapter|parte|part)\b/i.test(clean) || fontRatio >= 1.65) return 1
+  if (/^(?:lezione|lecture|sezione|section|modulo|module|unit[aà])\b/i.test(clean) || fontRatio >= 1.28 || line.centerOffset <= 0.18) return 2
+  return 3
+}
 
-  if (uniqueHeadings.length >= Math.min(4, Math.ceil(pageTexts.length / 3))) {
-    return uniqueHeadings.slice(0, 180)
+function scoreLayoutHeading(line: TextLayoutLine, stats: { medianFont: number; repeated: boolean }): number {
+  const clean = normalizeInlineText(line.text)
+  const words = clean.split(/\s+/).filter(Boolean)
+  if (clean.length < 4 || clean.length > 120 || words.length > 16) return 0
+  if (isOutlineNoiseTitle(clean)) return 0
+
+  const letters = clean.match(/\p{L}/gu)?.length ?? 0
+  if (letters < 3) return 0
+
+  const fontRatio = stats.medianFont ? line.maxFontSize / stats.medianFont : 1
+  const upper = clean.match(/\p{Lu}/gu)?.length ?? 0
+  let score = 0.18
+  if (OUTLINE_STRONG_PATTERN.test(clean)) score += 0.24
+  if (fontRatio >= 1.18) score += 0.2
+  if (fontRatio >= 1.42) score += 0.12
+  if (line.boldRatio >= 0.35) score += 0.12
+  if (line.topRatio <= 0.22) score += 0.1
+  if (line.centerOffset <= 0.18) score += 0.06
+  if (words.length >= 2 && words.length <= 9) score += 0.08
+  if (upper / Math.max(1, letters) > 0.42 || titleCaseRatio(words) >= 0.55) score += 0.08
+  if (TECHNICAL_SIGNAL.test(clean)) score += 0.05
+  if (/[.!?]$/.test(clean) && !OUTLINE_STRONG_PATTERN.test(clean)) score -= 0.22
+  if (stats.repeated && !OUTLINE_STRONG_PATTERN.test(clean)) score -= 0.42
+  if (clean.length < 18 && !OUTLINE_STRONG_PATTERN.test(clean) && fontRatio < 1.18) score -= 0.12
+  return clamp01(score)
+}
+
+function buildLayoutCandidates(layoutLines: TextLayoutLine[], pageCount: number): DocumentHeading[] {
+  if (!layoutLines.length) return []
+  const medianFont = median(layoutLines.map((line) => line.maxFontSize))
+  const pageSetByKey = new Map<string, Set<number>>()
+  for (const line of layoutLines) {
+    const key = normalizeOutlineKey(line.text)
+    if (!key || key.length < 4) continue
+    const set = pageSetByKey.get(key) ?? new Set<number>()
+    set.add(line.page)
+    pageSetByKey.set(key, set)
   }
 
+  return layoutLines
+    .map((line, index) => {
+      const key = normalizeOutlineKey(line.text)
+      const repeated = (pageSetByKey.get(key)?.size ?? 0) >= Math.max(3, Math.ceil(pageCount * 0.22))
+      const score = scoreLayoutHeading(line, { medianFont, repeated })
+      const fontRatio = medianFont ? line.maxFontSize / medianFont : 1
+      return {
+        id: `layout-${line.page}-${index}-${hashForId(line.text)}`,
+        title: sanitizeOutlineTitle(line.text),
+        page: line.page,
+        level: layoutHeadingLevel(line, fontRatio),
+        score,
+        source: 'layout' as const,
+        sources: ['layout' as const],
+        evidence: `font ${Math.round(line.maxFontSize)} · top ${Math.round(line.topRatio * 100)}%`,
+      }
+    })
+    .filter((heading) => heading.score >= 0.52)
+}
+
+function buildSectionCandidates(sentences: DocSentence[]): DocumentHeading[] {
   const bySection = new Map<string, { title: string; page: number; count: number }>()
   for (const sentence of sentences) {
     if (!sentence.section) continue
     const title = compactTitle(sentence.section, `Pagina ${sentence.page}`)
-    const key = title.toLowerCase()
+    const key = normalizeOutlineKey(title)
+    if (!key || isOutlineNoiseTitle(title)) continue
     const existing = bySection.get(key)
     if (existing) {
       existing.count += 1
@@ -308,19 +540,21 @@ function buildDocumentOutline(pageTexts: Array<{ page: number; text: string }>, 
     }
   }
 
-  const sectionHeadings = [...bySection.values()]
-    .filter((item) => item.count >= 2 && !LOW_VALUE_TERMS.test(item.title))
+  return [...bySection.values()]
+    .filter((item) => item.count >= 2)
     .map((item, index) => ({
       id: `section-${item.page}-${index}-${hashForId(item.title)}`,
       title: item.title,
       page: item.page,
       level: 2 as const,
-      score: Math.min(1, 0.45 + item.count / 24),
+      score: Math.min(0.78, 0.45 + item.count / 24),
       source: 'section' as const,
+      sources: ['section' as const],
+      evidence: `${item.count} frasi associate`,
     }))
+}
 
-  if (sectionHeadings.length >= 3) return sectionHeadings.slice(0, 180)
-
+function buildPageTopicCandidates(pageTexts: Array<{ page: number; text: string }>, sentences: DocSentence[]): DocumentHeading[] {
   const pageTopics: DocumentHeading[] = []
   for (const { page } of pageTexts) {
     const pageSentences = sentences.filter((sentence) => sentence.page === page)
@@ -335,12 +569,131 @@ function buildDocumentOutline(pageTexts: Array<{ page: number; text: string }>, 
       title: compactTitle(topicSource, `Pagina ${page}`),
       page,
       level: 1,
-      score: 0.38,
+      score: 0.34,
       source: 'page',
+      sources: ['page'],
+      evidence: 'fallback per pagina',
     })
   }
+  return pageTopics
+}
 
-  return pageTopics.slice(0, 220)
+function mergeHeadingSources(existing: DocumentHeading, incoming: DocumentHeading): DocumentHeading {
+  const sources = [...new Set([...(existing.sources ?? [existing.source]), ...(incoming.sources ?? [incoming.source])])]
+  const better = incoming.score > existing.score ? incoming : existing
+  return {
+    ...better,
+    id: existing.id,
+    score: Math.max(existing.score, incoming.score),
+    source: sources.includes('bookmark') ? 'bookmark' : better.source,
+    sources,
+    evidence: [existing.evidence, incoming.evidence].filter(Boolean).join(' · ') || better.evidence,
+  }
+}
+
+function dedupeOutlineCandidates(candidates: DocumentHeading[], pageCount: number): DocumentHeading[] {
+  const byKey = new Map<string, DocumentHeading>()
+  for (const candidate of candidates) {
+    const title = sanitizeOutlineTitle(candidate.title)
+    const key = `${Math.floor(candidate.page / 2)}-${normalizeOutlineKey(title)}`
+    if (!normalizeOutlineKey(title) || isOutlineNoiseTitle(title)) continue
+    const existing = byKey.get(key)
+    const normalized: DocumentHeading = {
+      ...candidate,
+      title,
+      page: Math.max(1, Math.min(pageCount, Math.round(candidate.page || 1))),
+      level: Math.max(1, Math.min(3, candidate.level)) as 1 | 2 | 3,
+      score: clamp01(candidate.score),
+      sources: candidate.sources ?? [candidate.source],
+    }
+    byKey.set(key, existing ? mergeHeadingSources(existing, normalized) : normalized)
+  }
+  return [...byKey.values()]
+    .sort((a, b) => a.page - b.page || a.level - b.level || b.score - a.score)
+}
+
+function finalizeOutline(candidates: DocumentHeading[], pageCount: number): DocumentHeading[] {
+  const ordered = dedupeOutlineCandidates(candidates, pageCount).slice(0, 220)
+  const stack: DocumentHeading[] = []
+
+  return ordered.map((heading, index) => {
+    while (stack.length && stack[stack.length - 1].level >= heading.level) stack.pop()
+    const nextSameOrHigher = ordered.slice(index + 1).find((next) => next.level <= heading.level)
+    const pageEnd = nextSameOrHigher ? Math.max(heading.page, nextSameOrHigher.page - 1) : pageCount
+    const finalized: DocumentHeading = {
+      ...heading,
+      id: `${heading.source}-${heading.page}-${index}-${hashForId(heading.title)}`,
+      parentId: stack[stack.length - 1]?.id ?? null,
+      pageEnd,
+      ordinal: index,
+    }
+    stack.push(finalized)
+    return finalized
+  })
+}
+
+function outlineConfidence(outline: DocumentHeading[], pageCount: number): number {
+  if (!outline.length) return 0
+  const avgScore = outline.reduce((sum, heading) => sum + heading.score, 0) / outline.length
+  const sourceBonus = outline.some((heading) => heading.sources?.includes('bookmark'))
+    ? 0.18
+    : outline.some((heading) => heading.sources?.includes('layout'))
+      ? 0.1
+      : 0
+  const pageCoverage = new Set(outline.map((heading) => heading.page)).size / Math.max(1, pageCount)
+  const density = Math.min(1, outline.length / Math.max(3, Math.ceil(pageCount / 8)))
+  return clamp01(avgScore * 0.58 + density * 0.2 + Math.min(0.22, pageCoverage * 0.36) + sourceBonus)
+}
+
+function buildDocumentOutlineResult(input: OutlineBuildInput): OutlineBuildResult {
+  const native = (input.nativeOutline ?? []).filter((heading) => heading.page >= 1 && heading.page <= input.pageCount)
+  const layout = buildLayoutCandidates(input.layoutLines ?? [], input.pageCount)
+  const textHeadings = input.pageTexts.flatMap(({ page, text }) => pageHeadings(text, page))
+  const sections = buildSectionCandidates(input.sentences)
+  const pages = buildPageTopicCandidates(input.pageTexts, input.sentences)
+  const allCandidates = dedupeOutlineCandidates([...native, ...layout, ...textHeadings, ...sections, ...pages], input.pageCount)
+
+  const nativeGood = native.length >= 2 && outlineConfidence(finalizeOutline(native, input.pageCount), input.pageCount) >= 0.58
+  const layoutGood = layout.length >= Math.min(4, Math.ceil(input.pageCount / 4))
+  const sectionGood = sections.length >= 3
+
+  let strategy: DocumentOutlineMeta['strategy'] = 'page'
+  let selected: DocumentHeading[] = pages
+  const reasons: string[] = []
+
+  if (nativeGood) {
+    strategy = layout.length ? 'hybrid' : 'native'
+    selected = [...native, ...layout.filter((heading) => heading.score >= 0.78)]
+    reasons.push('bookmark PDF nativi disponibili')
+  } else if (layoutGood) {
+    strategy = 'layout'
+    selected = layout
+    reasons.push('titoli riconosciuti da font, posizione e numerazione')
+  } else if (sectionGood) {
+    strategy = 'section'
+    selected = sections
+    reasons.push('titoli ricostruiti dalle sezioni del testo')
+  } else {
+    strategy = 'page'
+    selected = pages
+    reasons.push('fallback prudente per pagina')
+  }
+
+  const outline = finalizeOutline(selected, input.pageCount)
+  const confidence = outlineConfidence(outline, input.pageCount)
+  const aiRecommended = confidence < 0.62 && (input.pageCount >= 18 || native.length === 0 || layout.length < 3)
+
+  return {
+    outline,
+    candidates: allCandidates.slice(0, 260),
+    meta: {
+      strategy,
+      confidence,
+      candidateCount: allCandidates.length,
+      aiRecommended,
+      reasons,
+    },
+  }
 }
 
 const EN_HINTS = ['the', 'and', 'of', 'is', 'are', 'this', 'that', 'with', 'from', 'which', 'between', 'into']
@@ -353,6 +706,59 @@ function detectLanguage(text: string): 'it' | 'en' {
   const en = EN_HINTS.reduce((sum, hint) => sum + (counts.get(hint) ?? 0), 0)
   const it = IT_HINTS.reduce((sum, hint) => sum + (counts.get(hint) ?? 0), 0)
   return en > it ? 'en' : 'it'
+}
+
+async function resolveOutlineDestinationPage(pdf: unknown, dest: unknown): Promise<number | null> {
+  try {
+    const pdfLike = pdf as {
+      getDestination?: (dest: string) => Promise<unknown[] | null>
+      getPageIndex?: (ref: unknown) => Promise<number>
+    }
+    const resolved = typeof dest === 'string' ? await pdfLike.getDestination?.(dest) : dest
+    const target = Array.isArray(resolved) ? resolved[0] : null
+    if (typeof target === 'number' && Number.isFinite(target)) return Math.max(1, Math.round(target + 1))
+    if (target && pdfLike.getPageIndex) return (await pdfLike.getPageIndex(target)) + 1
+  } catch {
+    return null
+  }
+  return null
+}
+
+async function extractNativePdfOutline(pdf: unknown, pageCount: number): Promise<DocumentHeading[]> {
+  try {
+    const pdfLike = pdf as { getOutline?: () => Promise<unknown[] | null> }
+    const outline = await pdfLike.getOutline?.()
+    if (!outline?.length) return []
+
+    const entries: DocumentHeading[] = []
+    const walk = async (items: unknown[], level: 1 | 2 | 3) => {
+      for (const item of items.slice(0, 260)) {
+        if (!item || typeof item !== 'object') continue
+        const node = item as { title?: unknown; dest?: unknown; items?: unknown[] }
+        const title = sanitizeOutlineTitle(String(node.title ?? ''))
+        const page = await resolveOutlineDestinationPage(pdf, node.dest)
+        if (title && page && page >= 1 && page <= pageCount && !isOutlineNoiseTitle(title)) {
+          entries.push({
+            id: `bookmark-${page}-${entries.length}-${hashForId(title)}`,
+            title,
+            page,
+            level,
+            score: 0.92,
+            source: 'bookmark',
+            sources: ['bookmark'],
+            evidence: 'bookmark PDF nativo',
+          })
+        }
+        if (Array.isArray(node.items) && node.items.length && level < 3) {
+          await walk(node.items, (level + 1) as 1 | 2 | 3)
+        }
+      }
+    }
+    await walk(outline, 1)
+    return entries
+  } catch {
+    return []
+  }
 }
 
 export type PageVisuals = {
@@ -591,11 +997,12 @@ function selectRenderPages(pages: PageAnalysis[], max = MAX_RENDERED_PAGES): Map
 function buildDocumentReview(input: {
   pages: PageAnalysis[]
   outline: DocumentHeading[]
+  outlineMeta?: DocumentOutlineMeta
   renderedPages: RenderedPdfPage[]
   sentences: DocSentence[]
   textChars: number
 }): DocumentReview {
-  const { pages, outline, renderedPages, sentences, textChars } = input
+  const { pages, outline, outlineMeta, renderedPages, sentences, textChars } = input
   const lowTextPages = pages.filter((page) => page.chars > 0 && page.chars < LOW_TEXT_THRESHOLD).map((page) => page.page)
   const blankPages = pages.filter((page) => page.chars === 0 && (page.figureCount ?? 0) === 0).map((page) => page.page)
   // "Pages with images" now means pages with a real, study-worthy figure — a
@@ -634,6 +1041,14 @@ function buildDocumentReview(input: {
       detail: 'Non sono emersi titoli affidabili. L’indice usa un fallback per pagina, ma un PDF con heading reali funziona meglio.',
       pages: [],
     })
+  } else if (outlineMeta?.aiRecommended) {
+    issues.push({
+      id: 'outline-ai-recommended',
+      severity: 'info',
+      title: 'Indice migliorabile',
+      detail: 'L’indice è utilizzabile, ma il documento ha segnali strutturali deboli: una rifinitura AI può ordinare meglio capitoli e sottoargomenti senza analizzare tutto il PDF.',
+      pages: [],
+    })
   }
   if (pagesWithImages.length && renderedPages.length === 0) {
     issues.push({
@@ -647,7 +1062,8 @@ function buildDocumentReview(input: {
 
   const avgChars = pages.length ? textChars / pages.length : 0
   const textQuality: DocumentReview['textQuality'] = avgChars > 550 && ocrPages.length <= pages.length * 0.15 ? 'good' : avgChars > 120 ? 'partial' : 'poor'
-  const structureQuality: DocumentReview['structureQuality'] = outline.length >= Math.min(8, pages.length) ? 'good' : outline.length >= 3 ? 'partial' : 'poor'
+  const structureConfidence = outlineMeta?.confidence ?? outlineConfidence(outline, pages.length || 1)
+  const structureQuality: DocumentReview['structureQuality'] = structureConfidence >= 0.72 ? 'good' : structureConfidence >= 0.43 ? 'partial' : 'poor'
   const penalty = issues.reduce((sum, issue) => sum + (issue.severity === 'danger' ? 22 : issue.severity === 'warning' ? 10 : 3), 0)
   const structureBonus = structureQuality === 'good' ? 12 : structureQuality === 'partial' ? 5 : 0
   const imageBonus = renderedPages.length ? 6 : 0
@@ -675,10 +1091,17 @@ export function refreshAnalysisDerivedFields(analysis: PdfAnalysis): PdfAnalysis
       .join('\n'),
   }))
   const textChars = analysis.text.replace(/\s+/g, '').length
-  const outline = buildDocumentOutline(pageTexts, analysis.sentences)
+  const outlineResult = buildDocumentOutlineResult({
+    pageTexts,
+    sentences: analysis.sentences,
+    pageCount: analysis.pageCount,
+    nativeOutline: analysis.outline?.filter((heading) => heading.source === 'bookmark'),
+    layoutLines: [],
+  })
   const review = buildDocumentReview({
     pages: analysis.pages,
-    outline,
+    outline: outlineResult.outline,
+    outlineMeta: outlineResult.meta,
     renderedPages: analysis.renderedPages ?? [],
     sentences: analysis.sentences,
     textChars,
@@ -689,34 +1112,68 @@ export function refreshAnalysisDerivedFields(analysis: PdfAnalysis): PdfAnalysis
     textChars,
     language: detectLanguage(analysis.text),
     ocrPages: analysis.pages.filter((page) => page.needsOcr).map((page) => page.page),
-    outline,
+    outline: outlineResult.outline,
+    outlineCandidates: outlineResult.candidates,
+    outlineMeta: outlineResult.meta,
     review,
   }
 }
 
+export function applyDocumentOutline(analysis: PdfAnalysis, outline: DocumentHeading[], meta?: Partial<DocumentOutlineMeta>): PdfAnalysis {
+  const finalized = finalizeOutline(outline.map((heading) => ({
+    ...heading,
+    source: heading.source ?? 'llm_validation',
+    sources: heading.sources?.length ? heading.sources : [heading.source ?? 'llm_validation'],
+    score: heading.score || 0.72,
+  })), analysis.pageCount)
+  const outlineMeta: DocumentOutlineMeta = {
+    strategy: 'hybrid',
+    confidence: outlineConfidence(finalized, analysis.pageCount),
+    candidateCount: finalized.length,
+    aiRecommended: false,
+    reasons: ['indice rifinito e validato'],
+    ...meta,
+  }
+  return {
+    ...analysis,
+    outline: finalized,
+    outlineMeta,
+    review: buildDocumentReview({
+      pages: analysis.pages,
+      outline: finalized,
+      outlineMeta,
+      renderedPages: analysis.renderedPages ?? [],
+      sentences: analysis.sentences,
+      textChars: analysis.textChars,
+    }),
+  }
+}
+
 export async function analyzePdf(buffer: ArrayBuffer): Promise<PdfAnalysis> {
-  const loadingTask = pdfjsLib.getDocument({ data: toUint8(buffer) })
+  const loadingTask = pdfjsLib.getDocument(getPdfDocumentParams(toUint8(buffer)))
   const pdf = await loadingTask.promise
   const pageCount = pdf.numPages
   const pages: PageAnalysis[] = []
   const chunks: string[] = []
   const pageTexts: Array<{ page: number; text: string }> = []
+  const layoutLines: TextLayoutLine[] = []
   const sentences: DocSentence[] = []
   const renderedPages: RenderedPdfPage[] = []
   let sentenceIndex = 0
 
   try {
+    const nativeOutline = await extractNativePdfOutline(pdf, pageCount)
     for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
       const page = await pdf.getPage(pageNumber)
       const content = await page.getTextContent()
-      const rawPageText = content.items
-        .map((item) => {
-          if (!('str' in item)) return ''
-          return `${item.str}${'hasEOL' in item && item.hasEOL ? '\n' : ' '}`
-        })
-        .join('')
-      const pageText = cleanPageText(rawPageText)
       const baseViewport = (page as { getViewport: (o: { scale: number }) => { width: number; height: number } }).getViewport({ scale: 1 })
+      const artifacts = extractTextArtifacts(content as {
+        items?: unknown[]
+        styles?: Record<string, { fontFamily?: string; fontSubstitution?: string }>
+      }, pageNumber, baseViewport)
+      const rawPageText = artifacts.rawText
+      const pageText = cleanPageText(rawPageText)
+      layoutLines.push(...artifacts.layoutLines)
       const visuals = await analyzePageVisuals(page, baseViewport.width * baseViewport.height, pageText.length)
       chunks.push(pageText)
       pageTexts.push({ page: pageNumber, text: pageText })
@@ -754,32 +1211,41 @@ export async function analyzePdf(buffer: ArrayBuffer): Promise<PdfAnalysis> {
       if (rendered) renderedPages.push(rendered)
       page.cleanup()
     }
+
+    const text = chunks.join('\n').trim()
+    const outlineResult = buildDocumentOutlineResult({
+      pageTexts,
+      sentences,
+      pageCount,
+      nativeOutline,
+      layoutLines,
+    })
+    const language = detectLanguage(text)
+    const review = buildDocumentReview({
+      pages,
+      outline: outlineResult.outline,
+      outlineMeta: outlineResult.meta,
+      renderedPages,
+      sentences,
+      textChars: text.replace(/\s+/g, '').length,
+    })
+
+    return {
+      pageCount,
+      pages,
+      ocrPages: pages.filter((page) => page.needsOcr).map((page) => page.page),
+      text,
+      textChars: text.replace(/\s+/g, '').length,
+      sentences,
+      language,
+      outline: outlineResult.outline,
+      outlineCandidates: outlineResult.candidates,
+      outlineMeta: outlineResult.meta,
+      renderedPages,
+      review,
+    }
   } finally {
     await loadingTask.destroy()
-  }
-
-  const text = chunks.join('\n').trim()
-  const outline = buildDocumentOutline(pageTexts, sentences)
-  const language = detectLanguage(text)
-  const review = buildDocumentReview({
-    pages,
-    outline,
-    renderedPages,
-    sentences,
-    textChars: text.replace(/\s+/g, '').length,
-  })
-
-  return {
-    pageCount,
-    pages,
-    ocrPages: pages.filter((page) => page.needsOcr).map((page) => page.page),
-    text,
-    textChars: text.replace(/\s+/g, '').length,
-    sentences,
-    language,
-    outline,
-    renderedPages,
-    review,
   }
 }
 

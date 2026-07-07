@@ -68,6 +68,17 @@ export type FlashcardDraft = {
   estimatedCostUsd?: number
 }
 
+export type StructuredOutlineEntry = {
+  title: string
+  level: 1 | 2 | 3
+  pageStart: number
+  pageEnd: number
+  confidence: number
+  sources: Array<'layout' | 'section' | 'page'>
+  ordinal: number
+  parentOrdinal: number | null
+}
+
 export type FlashcardCacheEntry = {
   cards: FlashcardDraft[]
   modelName?: string
@@ -132,6 +143,7 @@ export async function processUploadedPdf(input: PipelineInput) {
 
     const structuredPages = mergeNativeAndOcr(extracted.pages, ocrPages)
     const chunks = chunkStructuredPdf(structuredPages)
+    const outline = buildStructuredOutline(structuredPages)
 
     const flashcards = input.generateFlashcards
       ? await generateFlashcardsCostFirst(chunks, input.tier, {
@@ -148,6 +160,7 @@ export async function processUploadedPdf(input: PipelineInput) {
     return {
       storagePath: storedPath,
       compression,
+      outline,
       chunks,
       flashcards,
     }
@@ -375,6 +388,68 @@ function splitStructuredBlocks(text: string): TextBlock[] {
 
   flushParagraph()
   return blocks
+}
+
+function buildStructuredOutline(pages: Array<{ pageNumber: number; text: string }>): StructuredOutlineEntry[] {
+  const candidates: Array<Omit<StructuredOutlineEntry, 'pageEnd' | 'ordinal' | 'parentOrdinal'>> = []
+
+  for (const page of pages) {
+    const blocks = splitStructuredBlocks(page.text)
+    blocks.forEach((block, index) => {
+      if (block.kind !== 'heading') return
+      const title = normalizeText(block.text).replace(/[.:;,\s]+$/, '')
+      if (!title || isLowValueLine(title)) return
+      candidates.push({
+        title,
+        level: block.level ?? 2,
+        pageStart: page.pageNumber,
+        confidence: Math.min(0.88, 0.54 + (block.level === 1 ? 0.18 : block.level === 2 ? 0.1 : 0.04) + (index <= 2 ? 0.08 : 0)),
+        sources: ['layout'],
+      })
+    })
+  }
+
+  const selected = candidates.length >= Math.min(4, Math.ceil(pages.length / 4))
+    ? dedupeOutline(candidates)
+    : pages
+      .map((page) => {
+        const firstUseful = splitStructuredBlocks(page.text)
+          .find((block) => block.kind !== 'heading' && block.text.length >= 40 && !isLowValueLine(block.text))
+        return firstUseful
+          ? {
+              title: normalizeText(firstUseful.text).split(/[.!?]/)[0]?.slice(0, 82) || `Pagina ${page.pageNumber}`,
+              level: 1 as const,
+              pageStart: page.pageNumber,
+              confidence: 0.34,
+              sources: ['page' as const],
+            }
+          : null
+      })
+      .filter((entry): entry is Omit<StructuredOutlineEntry, 'pageEnd' | 'ordinal' | 'parentOrdinal'> => Boolean(entry))
+
+  const stack: Array<{ level: 1 | 2 | 3; ordinal: number }> = []
+  return selected.slice(0, 220).map((entry, index) => {
+    while (stack.length && stack[stack.length - 1].level >= entry.level) stack.pop()
+    const next = selected.slice(index + 1).find((candidate) => candidate.level <= entry.level)
+    const finalized: StructuredOutlineEntry = {
+      ...entry,
+      pageEnd: next ? Math.max(entry.pageStart, next.pageStart - 1) : pages.length,
+      ordinal: index,
+      parentOrdinal: stack[stack.length - 1]?.ordinal ?? null,
+    }
+    stack.push({ level: finalized.level, ordinal: index })
+    return finalized
+  })
+}
+
+function dedupeOutline<T extends { title: string; pageStart: number; confidence: number }>(candidates: T[]): T[] {
+  const seen = new Map<string, T>()
+  for (const candidate of candidates) {
+    const key = `${candidate.pageStart}-${candidate.title.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').trim()}`
+    const existing = seen.get(key)
+    if (!existing || candidate.confidence > existing.confidence) seen.set(key, candidate)
+  }
+  return [...seen.values()].sort((a, b) => a.pageStart - b.pageStart || b.confidence - a.confidence)
 }
 
 function updateSectionPath(current: string[], title: string, level: 1 | 2 | 3) {

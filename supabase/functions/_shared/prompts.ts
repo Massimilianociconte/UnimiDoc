@@ -138,3 +138,43 @@ export function buildImageOcclusionPrompt(params: { language: string; pageNumber
     `Pagina documento: ${params.pageNumber ?? 'unknown'}`,
   ].join('\n')
 }
+
+// --------------------------------------------------------------------------
+// outline_v1 — cost-first document outline refinement (JSON only).
+// --------------------------------------------------------------------------
+export type OutlineCandidateForPrompt = {
+  title: string
+  page: number
+  level?: number
+  score?: number
+  source?: string
+  evidence?: string
+}
+
+export function buildOutlinePrompt(params: {
+  candidates: OutlineCandidateForPrompt[]
+  pageCount: number
+  language: string
+}): ChatMessage[] {
+  const system = [
+    'Sei un assistente per costruire indici verificabili di dispense universitarie.',
+    'Devi produrre SOLO json valido. Non inventare capitoli o titoli non supportati dai candidati forniti.',
+    'Obiettivo: trasformare candidati rumorosi in un indice gerarchico breve, cliccabile e utile allo studio.',
+    'Mantieni i titoli nella lingua del documento. Puoi correggere maiuscole/minuscole e accorciare titoli lunghi, ma il significato deve restare ancorato ai candidati.',
+    'Scarta footer, header, bibliografia, copyright, indice analitico, numeri pagina e frasi generiche.',
+    'Non usare contenuti esterni. Se i candidati sono scarsi, restituisci poche voci ad alta confidenza.',
+    'Formato json: {"outline":[{"title":string,"level":1|2|3,"page_start":number,"page_end":number|null,"confidence":number,"source_candidate_titles":[string]}],"notes":[string]}',
+    'Regole: level coerente; page_start tra 1 e page_count; page_end null o >= page_start; confidence 0..1; massimo 120 voci; nessun markdown.',
+  ].join('\n')
+
+  const user = [
+    `Lingua: ${params.language}`,
+    `page_count: ${params.pageCount}`,
+    'Candidati verificabili:',
+    JSON.stringify(params.candidates.slice(0, 220)),
+    '',
+    'Restituisci SOLO json valido.',
+  ].join('\n')
+
+  return [{ role: 'system', content: system }, { role: 'user', content: user }]
+}

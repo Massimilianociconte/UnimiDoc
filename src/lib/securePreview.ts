@@ -1,7 +1,4 @@
-import * as pdfjsLib from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+import { getPdfDocumentParams, pdfjsLib } from './pdfjsConfig'
 
 // --------------------------------------------------------------------------
 // Secure preview generation.
@@ -40,7 +37,7 @@ export async function renderWatermarkedPreviews(
   options: PreviewOptions = {},
 ): Promise<PreviewImage[]> {
   const { maxPages = 3, watermark = 'UnimiDoc · anteprima', scale = 1.5 } = options
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer.slice(0)) })
+  const loadingTask = pdfjsLib.getDocument(getPdfDocumentParams(new Uint8Array(buffer.slice(0))))
   const pdf = await loadingTask.promise
   const images: PreviewImage[] = []
 

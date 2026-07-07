@@ -25,6 +25,8 @@ export type DocumentItem = {
   pages: number
   sizeMb: number
   quality: number
+  flashcardQualityPercent?: number
+  flashcardQualityVotes?: number
   credits: number
   downloads: number
   description: string
@@ -84,6 +86,8 @@ export const initialDocuments: DocumentItem[] = [
     pages: 142,
     sizeMb: 18.4,
     quality: 9.6,
+    flashcardQualityPercent: 86,
+    flashcardQualityVotes: 74,
     credits: 12,
     downloads: 284,
     description:
@@ -121,6 +125,8 @@ export const initialDocuments: DocumentItem[] = [
     pages: 38,
     sizeMb: 5.2,
     quality: 8.7,
+    flashcardQualityPercent: 78,
+    flashcardQualityVotes: 31,
     credits: 6,
     downloads: 193,
     description:
@@ -149,6 +155,8 @@ export const initialDocuments: DocumentItem[] = [
     pages: 72,
     sizeMb: 9.8,
     quality: 8.2,
+    flashcardQualityPercent: 72,
+    flashcardQualityVotes: 28,
     credits: 8,
     downloads: 151,
     description:
@@ -177,6 +185,8 @@ export const initialDocuments: DocumentItem[] = [
     pages: 44,
     sizeMb: 4.1,
     quality: 8.9,
+    flashcardQualityPercent: 84,
+    flashcardQualityVotes: 42,
     credits: 7,
     downloads: 204,
     description:

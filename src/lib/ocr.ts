@@ -1,8 +1,6 @@
-import * as pdfjsLib from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { refreshAnalysisDerivedFields, type PdfAnalysis, type DocSentence } from './pdfProcessing'
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
+import { TESSERACT_WORKER_OPTIONS } from './cdnConfig'
+import { getPdfDocumentParams, pdfjsLib } from './pdfjsConfig'
 
 // --------------------------------------------------------------------------
 // Real in-browser OCR (zero-cost) with tesseract.js.
@@ -128,8 +126,18 @@ export async function runOcr(
   }
 
   const { createWorker } = await import('tesseract.js')
-  const worker = await createWorker(options.languages ?? 'ita+eng')
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer.slice(0)) })
+  const worker = await createWorker(options.languages ?? 'ita+eng', 1, {
+    ...TESSERACT_WORKER_OPTIONS,
+  }, {
+    preserve_interword_spaces: '1',
+    user_patterns_suffix: '',
+    user_words_suffix: '',
+  } as Record<string, string>)
+  await worker.setParameters({
+    preserve_interword_spaces: '1',
+    user_defined_dpi: '300',
+  })
+  const loadingTask = pdfjsLib.getDocument(getPdfDocumentParams(new Uint8Array(buffer.slice(0))))
   const pdf = await loadingTask.promise
   const results: OcrPageResult[] = []
   let megapixelsUsed = 0

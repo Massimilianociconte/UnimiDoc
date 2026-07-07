@@ -93,6 +93,18 @@ function clampInt(value: unknown, max: number, fallback: number | null): number 
       })
     }
 
+    // Dashboard mastery rollup (best-effort). Newer clients can record the
+    // answer immediately and let this endpoint update only SRS scheduling.
+    if (body.recordProgress !== false) {
+      const { error: progressError } = await supabase.rpc('record_flashcard_study_event', {
+        p_flashcard_id: flashcardId,
+        p_answer_status: answerStatus,
+        p_next_due_at: next.dueAt,
+        p_last_reviewed_at: next.lastReviewedAt,
+      })
+      if (progressError) console.error('flashcard progress rollup failed:', progressError.message)
+    }
+
     return jsonResponse({ srs: next }, 200, req)
   } catch (error) {
     return errorResponse(error, req)

@@ -44,6 +44,8 @@ import {
   Clock,
   MessagesSquare,
   Target,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   TrendingUp,
   Trophy,
@@ -111,12 +113,31 @@ import { getPremiumState, refreshPremiumState, setPremiumState } from './lib/ent
 import {
   autoDetectOcclusion,
   generatePremiumFlashcards as generateBackendPremiumFlashcards,
+  generatePremiumOutline,
   requestAiHelp,
   setAccessTokenProvider,
+  submitSrsReview,
   type AiHelpMode,
   type PremiumGeneratedFlashcard,
 } from './lib/aiClient'
 import { buildUserDashboardData, loadDashboardLiveOverlay, type DashboardLiveOverlay } from './userDashboardData'
+import {
+  EMPTY_FLASHCARD_FILTERS,
+  filterFlashcardRecords,
+  isPersistedFlashcardId,
+  loadFlashcardDashboardData,
+  recordLocalFlashcardOutcome,
+  recordRemoteFlashcardOutcome,
+  saveRemoteFlashcardQualityVote,
+  setLocalFlashcardFavorite,
+  setLocalFlashcardQualityVote,
+  setRemoteFlashcardFavorite,
+  updateLocalFlashcardSchedule,
+  type FlashcardDashboardData,
+  type FlashcardDashboardFilters,
+  type FlashcardQualityVote,
+  type FlashcardStudyRecord,
+} from './lib/flashcardProgress'
 import { creditsToEur, creditTier, documentCreditPrice, revenueSplit, tierLabel, TOPUP_PACKS, WELCOME_CREDITS } from './lib/creditPricing'
 import { moderatePublicText } from './lib/contentModeration'
 import {
@@ -1074,6 +1095,7 @@ function DocumentCard({
       <div className="note-tags">
         <span><SubjectIcon compact name={document.subject} />{course?.shortName ?? document.subject}</span>
         <span>{document.pages} pagine</span>
+        {document.flashcardQualityPercent ? <span><BrainCircuit size={14} /> {document.flashcardQualityPercent}% utili</span> : null}
       </div>
       <div className="note-meta">
         <span><Star size={15} /> {document.quality.toFixed(1)} ({document.downloads})</span>
@@ -1101,6 +1123,7 @@ type UploaderRankEntry = {
   rating: number
   reviews: number
   reports: number
+  flashcardQuality: number
   score: number
 }
 
@@ -1119,6 +1142,10 @@ function buildUploaderRanking(documents: DocumentItem[]): UploaderRankEntry[] {
     .map(([name, docs]) => {
       const downloads = docs.reduce((total, doc) => total + doc.downloads, 0)
       const quality = docs.reduce((total, doc) => total + doc.quality, 0) / docs.length
+      const flashcardQualityDocs = docs.filter((doc) => typeof doc.flashcardQualityPercent === 'number')
+      const flashcardQuality = flashcardQualityDocs.length
+        ? flashcardQualityDocs.reduce((total, doc) => total + (doc.flashcardQualityPercent ?? 0), 0) / flashcardQualityDocs.length
+        : 0
       const trust = docs.reduce((total, doc) => total + doc.uploaderTrust, 0) / docs.length
       const reports = docs.reduce((total, doc) => total + doc.reportCount, 0)
       // Valutazione media 1–5 derivata dalla qualità (0–10); recensioni stimate
@@ -1131,10 +1158,11 @@ function buildUploaderRanking(documents: DocumentItem[]): UploaderRankEntry[] {
         Math.sqrt(downloads) * 6 + // vendite (sub-lineare)
           quality * 8 + // qualità media
           rating * 10 + // valutazioni
+          flashcardQuality * 0.45 + // qualità didattica delle flashcard generate
           reliability + // affidabilità
           consistency * 5, // costanza
       )
-      return { name, documents: docs.length, downloads, quality, trust, rating, reviews, reports, score: Math.max(0, score) }
+      return { name, documents: docs.length, downloads, quality, trust, rating, reviews, reports, flashcardQuality, score: Math.max(0, score) }
     })
     .sort((a, b) => b.score - a.score)
 }
@@ -1170,7 +1198,7 @@ function UploaderLeaderboard({ documents, onOpenProfile }: { documents: Document
             <span className={`leaderboard-rank rank-${index + 1}`}>{index + 1}</span>
             <div>
               <button className="leaderboard-name" onClick={() => onOpenProfile(entry.name)} type="button">{entry.name}</button>
-              <small><Star size={11} /> {entry.rating.toFixed(1)} · {entry.downloads} download · {entry.documents} materiali</small>
+              <small><Star size={11} /> {entry.rating.toFixed(1)} · {entry.downloads} download · {entry.documents} materiali · {Math.round(entry.flashcardQuality)}% flashcard utili</small>
             </div>
             <em>{entry.score} pt</em>
           </li>
@@ -1229,6 +1257,7 @@ function PublicProfilePage({
         <article><strong>{entry?.downloads ?? 0}</strong><span>Vendite/Download</span></article>
         <article><strong>{entry?.reviews ?? 0}</strong><span>Recensioni</span></article>
         <article><strong>{entry?.quality.toFixed(1) ?? '—'}</strong><span>Qualità media</span></article>
+        <article><strong>{entry ? `${Math.round(entry.flashcardQuality)}%` : '—'}</strong><span>Flashcard utili</span></article>
       </section>
 
       <section className="profile-materials">
@@ -1325,6 +1354,7 @@ function DocumentPage({
           <div className="document-badges">
             {doc.verified ? <span className="document-badge verified"><ShieldCheck size={14} /> Verificato</span> : null}
             <span className="document-badge"><Star size={14} /> {doc.quality.toFixed(1)}/10</span>
+            {doc.flashcardQualityPercent ? <span className="document-badge"><BrainCircuit size={14} /> Flashcard utili {doc.flashcardQualityPercent}%</span> : null}
             <span className="document-badge"><Download size={14} /> {doc.downloads} download</span>
             <span className="document-badge"><FileText size={14} /> {doc.pages} pagine</span>
           </div>
@@ -1364,6 +1394,12 @@ function DocumentPage({
           <div><dt>Pagine</dt><dd>{doc.pages}</dd></div>
           <div><dt>Dimensione</dt><dd>{doc.sizeMb.toFixed(1)} MB</dd></div>
           <div><dt>Lingua</dt><dd>{doc.language}</dd></div>
+          {doc.flashcardQualityPercent ? (
+            <div>
+              <dt>Qualità flashcard</dt>
+              <dd>{doc.flashcardQualityPercent}% · {doc.flashcardQualityVotes ?? 0} valutazioni</dd>
+            </div>
+          ) : null}
           {insights ? <div><dt>Livello</dt><dd className="document-depth">{insights.depthLevel}</dd></div> : null}
         </dl>
         {contentFeatures.length ? (
@@ -2473,15 +2509,195 @@ function SearchHighlightedText({ text, query }: { text: string; query: string })
   return <>{parts} </>
 }
 
+function renderRichInline(text: string, keyPrefix: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = []
+  const tokenPattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\n]+\*)/g
+  let cursor = 0
+  let tokenIndex = 0
+  let match = tokenPattern.exec(text)
+
+  while (match) {
+    if (match.index > cursor) nodes.push(text.slice(cursor, match.index))
+    const token = match[0]
+    const key = `${keyPrefix}-${tokenIndex}`
+    if (token.startsWith('**')) {
+      nodes.push(<strong key={key}>{token.slice(2, -2)}</strong>)
+    } else if (token.startsWith('`')) {
+      nodes.push(<code key={key}>{token.slice(1, -1)}</code>)
+    } else {
+      nodes.push(<em key={key}>{token.slice(1, -1)}</em>)
+    }
+    cursor = match.index + token.length
+    tokenIndex += 1
+    match = tokenPattern.exec(text)
+  }
+
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return nodes
+}
+
+function splitMarkdownTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim())
+}
+
+function isMarkdownTableRow(line: string): boolean {
+  const trimmed = line.trim()
+  return trimmed.startsWith('|') && trimmed.endsWith('|') && splitMarkdownTableRow(trimmed).length >= 2
+}
+
+function isMarkdownTableDivider(line: string): boolean {
+  const cells = splitMarkdownTableRow(line)
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell))
+}
+
+function RichAiHelpContent({ content }: { content: string }) {
+  const normalized = content
+    .replace(/\r\n/g, '\n')
+    .replace(/([^\n])\s+(#{2,4})\s+/g, '$1\n$2 ')
+    .trim()
+  const lines = normalized.split('\n')
+  const blocks: React.ReactNode[] = []
+  let index = 0
+
+  while (index < lines.length) {
+    const rawLine = lines[index]
+    const line = rawLine.trim()
+
+    if (!line) {
+      index += 1
+      continue
+    }
+
+    if (line.startsWith('```')) {
+      const codeLines: string[] = []
+      index += 1
+      while (index < lines.length && !lines[index].trim().startsWith('```')) {
+        codeLines.push(lines[index])
+        index += 1
+      }
+      if (index < lines.length) index += 1
+      blocks.push(<pre key={`code-${index}`}>{codeLines.join('\n').trim()}</pre>)
+      continue
+    }
+
+    if (isMarkdownTableRow(line)) {
+      const tableLines: string[] = []
+      while (index < lines.length && isMarkdownTableRow(lines[index])) {
+        tableLines.push(lines[index])
+        index += 1
+      }
+      const rows = tableLines.filter((row) => !isMarkdownTableDivider(row)).map(splitMarkdownTableRow)
+      const [head, ...body] = rows
+      if (head?.length) {
+        blocks.push(
+          <div className="ai-help-table-wrap" key={`table-${index}`}>
+            <table>
+              <thead>
+                <tr>{head.map((cell, cellIndex) => <th key={cellIndex}>{renderRichInline(cell, `th-${index}-${cellIndex}`)}</th>)}</tr>
+              </thead>
+              <tbody>
+                {body.map((row, rowIndex) => (
+                  <tr key={rowIndex}>
+                    {row.map((cell, cellIndex) => <td key={cellIndex}>{renderRichInline(cell, `td-${index}-${rowIndex}-${cellIndex}`)}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>,
+        )
+        continue
+      }
+    }
+
+    const heading = line.match(/^(#{1,4})\s+(.+)$/)
+    if (heading) {
+      const Tag = heading[1].length <= 2 ? 'h4' : 'h5'
+      blocks.push(<Tag key={`heading-${index}`}>{renderRichInline(heading[2], `heading-${index}`)}</Tag>)
+      index += 1
+      continue
+    }
+
+    const listMatch = line.match(/^(\d+[.)]|[-*•])\s+(.+)$/)
+    if (listMatch) {
+      const ordered = /^\d/.test(listMatch[1])
+      const items: string[] = []
+      while (index < lines.length) {
+        const current = lines[index].trim().match(/^(\d+[.)]|[-*•])\s+(.+)$/)
+        if (!current || (/^\d/.test(current[1]) !== ordered)) break
+        items.push(current[2])
+        index += 1
+      }
+      const ListTag = ordered ? 'ol' : 'ul'
+      blocks.push(
+        <ListTag key={`list-${index}`}>
+          {items.map((item, itemIndex) => <li key={itemIndex}>{renderRichInline(item, `li-${index}-${itemIndex}`)}</li>)}
+        </ListTag>,
+      )
+      continue
+    }
+
+    const paragraphLines = [line]
+    index += 1
+    while (index < lines.length) {
+      const next = lines[index].trim()
+      if (
+        !next ||
+        next.startsWith('```') ||
+        /^#{1,4}\s+/.test(next) ||
+        /^(\d+[.)]|[-*•])\s+/.test(next) ||
+        isMarkdownTableRow(next)
+      ) {
+        break
+      }
+      paragraphLines.push(next)
+      index += 1
+    }
+    blocks.push(<p key={`p-${index}`}>{renderRichInline(paragraphLines.join(' '), `p-${index}`)}</p>)
+  }
+
+  return <div className="ai-help-content">{blocks}</div>
+}
+
+function buildFlashcardSourceContext(card: Flashcard, sentences: DocSentence[]): string | null {
+  if (!card.ref) return null
+  const samePage = sentences
+    .filter((sentence) => sentence.page === card.ref?.page)
+    .sort((a, b) => a.index - b.index)
+  const anchorIndex = samePage.findIndex((sentence) => sentence.index === card.ref?.sentenceIndex)
+  const contextWindow = anchorIndex >= 0
+    ? samePage.slice(Math.max(0, anchorIndex - 3), Math.min(samePage.length, anchorIndex + 4))
+    : []
+  const lines = contextWindow.length
+    ? contextWindow.map((sentence) => `${sentence.index === card.ref?.sentenceIndex ? '→ ' : ''}${sentence.text}`)
+    : [card.ref.text]
+  const uniqueLines = [...new Set(lines.filter(Boolean))]
+  const section = card.ref.section ? `Sezione: ${card.ref.section}\n` : ''
+
+  return `Pagina ${card.ref.page}\n${section}Contesto sorgente mirato:\n${uniqueLines.join('\n')}`.slice(0, 6000)
+}
+
 function FlashcardStudyModal({
   cards,
+  documentAuthor,
+  documentId,
   sentences,
+  subject,
   title,
+  user,
   onClose,
 }: {
   cards: Flashcard[]
+  documentAuthor?: string
+  documentId?: string | null
   sentences: DocSentence[]
+  subject?: string
   title: string
+  user?: AppAuthUser | null
   onClose: () => void
 }) {
   const [index, setIndex] = useState(0)
@@ -2493,9 +2709,12 @@ function FlashcardStudyModal({
   const [responseLog, setResponseLog] = useState<Record<string, AnswerStatus>>({})
   const storageKey = `${hashString(title)}-${cards.length}`
   const [srsByCard, setSrsByCard] = useState<Record<string, SrsState>>(() => loadSrsMap(storageKey))
+  const [favoriteByCard, setFavoriteByCard] = useState<Record<string, boolean>>({})
+  const [qualityVoteByCard, setQualityVoteByCard] = useState<Record<string, FlashcardQualityVote>>({})
   const [aiHelpMessage, setAiHelpMessage] = useState('')
   const [aiHelpLoading, setAiHelpLoading] = useState(false)
   const readerRef = useRef<HTMLDivElement>(null)
+  const progressUserId = user?.id ?? 'guest'
 
   useBodyScrollLock()
 
@@ -2522,6 +2741,12 @@ function FlashcardStudyModal({
   const sourceCoverage = pages.length ? Math.round((referencedPages.size / pages.length) * 100) : 0
   const completedCount = Object.keys(responseLog).length
   const currentSrs = current ? srsByCard[current.id] : null
+  const studyContext = useMemo(() => ({
+    documentId,
+    documentTitle: title || 'Documento',
+    documentAuthor: documentAuthor || 'Autore non indicato',
+    subject: subject || 'Materia non classificata',
+  }), [documentAuthor, documentId, subject, title])
 
   const choiceOptions = useMemo(() => {
     if (!current) return []
@@ -2591,12 +2816,16 @@ function FlashcardStudyModal({
     setAnswerStatus(status)
     setRevealed(true)
     setResponseLog((currentLog) => ({ ...currentLog, [current.id]: status }))
+    recordLocalFlashcardOutcome(progressUserId, current, studyContext, status)
+    if (isPersistedFlashcardId(current.id)) void recordRemoteFlashcardOutcome(current.id, status)
   }
 
   const markUnknown = () => {
     setAnswerStatus('unknown')
     setRevealed(true)
     setResponseLog((currentLog) => ({ ...currentLog, [current.id]: 'unknown' }))
+    recordLocalFlashcardOutcome(progressUserId, current, studyContext, 'incorrect')
+    if (isPersistedFlashcardId(current.id)) void recordRemoteFlashcardOutcome(current.id, 'incorrect')
   }
 
   const chooseOption = (option: string) => {
@@ -2605,6 +2834,8 @@ function FlashcardStudyModal({
     setAnswerStatus(status)
     setRevealed(true)
     setResponseLog((currentLog) => ({ ...currentLog, [current.id]: status }))
+    recordLocalFlashcardOutcome(progressUserId, current, studyContext, status)
+    if (isPersistedFlashcardId(current.id)) void recordRemoteFlashcardOutcome(current.id, status)
   }
 
   const chooseTrueFalse = (value: boolean) => {
@@ -2613,19 +2844,51 @@ function FlashcardStudyModal({
     setAnswerStatus(status)
     setRevealed(true)
     setResponseLog((currentLog) => ({ ...currentLog, [current.id]: status }))
+    recordLocalFlashcardOutcome(progressUserId, current, studyContext, status)
+    if (isPersistedFlashcardId(current.id)) void recordRemoteFlashcardOutcome(current.id, status)
   }
 
   const rateSrs = (rating: SrsRating) => {
+    const effectiveStatus = answerStatus === 'unanswered' ? (revealed ? 'correct' : 'skipped') : answerStatus
     const next = calculateNextReview({
       currentState: currentSrs,
       rating,
-      answerStatus: answerStatus === 'unanswered' ? (revealed ? 'correct' : 'skipped') : answerStatus,
+      answerStatus: effectiveStatus,
     })
     setSrsByCard((state) => {
       const updated = { ...state, [current.id]: next }
       saveSrsMap(storageKey, updated)
       return updated
     })
+    if (answerStatus === 'unanswered') {
+      recordLocalFlashcardOutcome(progressUserId, current, studyContext, effectiveStatus, next)
+    } else {
+      updateLocalFlashcardSchedule(progressUserId, current.id, next)
+    }
+    if (isPersistedFlashcardId(current.id)) {
+      void submitSrsReview({
+        flashcardId: current.id,
+        rating,
+        answerStatus: effectiveStatus,
+        questionType: current.source,
+        userAnswer: userAnswer || selectedChoice || undefined,
+        correctAnswer: current.back,
+        recordProgress: answerStatus === 'unanswered',
+      })
+    }
+  }
+
+  const toggleFavorite = () => {
+    const next = !favoriteByCard[current.id]
+    setFavoriteByCard((state) => ({ ...state, [current.id]: next }))
+    setLocalFlashcardFavorite(progressUserId, current.id, next)
+    if (isPersistedFlashcardId(current.id)) void setRemoteFlashcardFavorite(current.id, next)
+  }
+
+  const rateQuality = (vote: FlashcardQualityVote) => {
+    setQualityVoteByCard((state) => ({ ...state, [current.id]: vote }))
+    setLocalFlashcardQualityVote(progressUserId, current, studyContext, vote)
+    void saveRemoteFlashcardQualityVote(current.id, vote)
   }
 
   const runAiHelp = async (mode: AiHelpMode, label: string) => {
@@ -2635,12 +2898,13 @@ function FlashcardStudyModal({
     }
     setAiHelpLoading(true)
     setAiHelpMessage(`${label} in corso…`)
+    const sourceContext = buildFlashcardSourceContext(current, sentences)
     const result = await requestAiHelp({
       mode,
       question: current.front,
       correctAnswer: current.back,
       answerStatus: answerStatus === 'unanswered' ? undefined : answerStatus,
-      sourceText: current.ref?.text ?? null,
+      sourceText: sourceContext,
       flashcardId: current.id,
       language: 'it',
     })
@@ -2836,9 +3100,21 @@ function FlashcardStudyModal({
               <div className="study-source muted"><Eye size={14} /> Carta aggiunta manualmente</div>
             )}
 
+            <div className="study-card-actions">
+              <button className={favoriteByCard[current.id] ? 'active' : ''} onClick={toggleFavorite} type="button">
+                <Bookmark size={15} /> {favoriteByCard[current.id] ? 'Preferita' : 'Salva'}
+              </button>
+              <button className={qualityVoteByCard[current.id] === 1 ? 'active positive' : ''} onClick={() => rateQuality(1)} type="button">
+                <ThumbsUp size={15} /> Utile
+              </button>
+              <button className={qualityVoteByCard[current.id] === -1 ? 'active negative' : ''} onClick={() => rateQuality(-1)} type="button">
+                <ThumbsDown size={15} /> Poco utile
+              </button>
+            </div>
+
             <div className="ai-help-panel">
               <span><Sparkles size={15} /> AI Helps Premium</span>
-              <div>
+              <div className="ai-help-actions">
                 {(
                   [
                     ['explain', 'Explain'],
@@ -2852,7 +3128,7 @@ function FlashcardStudyModal({
                   </button>
                 ))}
               </div>
-              {aiHelpMessage ? <small>{aiHelpMessage}</small> : null}
+              {aiHelpMessage ? <RichAiHelpContent content={aiHelpMessage} /> : null}
             </div>
 
             {(revealed || answerStatus !== 'unanswered') ? (
@@ -2978,6 +3254,10 @@ const initialOcclusionMasks: OcclusionMask[] = [
   { id: 'mask-2', page: 1, label: '2', x: 0.16, y: 0.45, width: 0.24, height: 0.09, answer: 'Connettivo', hint: 'Sostiene il tessuto' },
   { id: 'mask-3', page: 1, label: '3', x: 0.58, y: 0.6, width: 0.28, height: 0.1, answer: 'Vaso sanguigno', hint: 'Trasporta cellule e nutrienti' },
 ]
+const emptyRenderedPages: NonNullable<PdfAnalysis['renderedPages']> = []
+const demoOcclusionPages: NonNullable<PdfAnalysis['renderedPages']> = [
+  { page: 1, dataUrl: demoPage03, width: 900, height: 1200, textChars: 0, imageCount: 1, figureCount: 1, figureScore: 0.8, reason: 'overview' },
+]
 
 function clampUnit(value: number, min = 0, max = 1) {
   if (Number.isNaN(value)) return min
@@ -2998,15 +3278,14 @@ function normalizeOcclusionMask(mask: OcclusionMask): OcclusionMask {
 }
 
 function ImageOcclusionLab({ analysis, premium }: { analysis?: PdfAnalysis | null; premium: boolean }) {
-  const renderedPages = analysis?.renderedPages ?? []
-  const visualPages = renderedPages.length
-    ? renderedPages
-    : [{ page: 1, dataUrl: demoPage03, width: 900, height: 1200, textChars: 0, imageCount: 1, figureCount: 1, figureScore: 0.8, reason: 'overview' as const }]
+  const renderedPages = analysis?.renderedPages ?? emptyRenderedPages
+  const visualPages = renderedPages.length ? renderedPages : demoOcclusionPages
+  const firstVisualPage = visualPages[0]?.page ?? 1
   const canvasRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<OcclusionDragState | null>(null)
   const draftRef = useRef<OcclusionDraftState | null>(null)
   const [draft, setDraft] = useState<OcclusionDraftState | null>(null)
-  const [selectedPage, setSelectedPage] = useState(visualPages[0]?.page ?? 1)
+  const [selectedPage, setSelectedPage] = useState(firstVisualPage)
   const [masks, setMasks] = useState<OcclusionMask[]>(() => (renderedPages.length ? [] : initialOcclusionMasks))
   const [selectedMaskId, setSelectedMaskId] = useState<string | null>(null)
   const [draggingMaskId, setDraggingMaskId] = useState<string | null>(null)
@@ -3018,11 +3297,10 @@ function ImageOcclusionLab({ analysis, premium }: { analysis?: PdfAnalysis | nul
   const activeMasks = masks.filter((mask) => mask.page === activePage.page)
 
   useEffect(() => {
-    const first = visualPages[0]?.page ?? 1
-    setSelectedPage(first)
+    setSelectedPage(firstVisualPage)
     setMasks(renderedPages.length ? [] : initialOcclusionMasks)
     setSelectedMaskId(null)
-  }, [renderedPages.length, visualPages[0]?.page])
+  }, [firstVisualPage, renderedPages.length])
 
   useEffect(() => {
     if (selectedMaskId && masks.some((mask) => mask.id === selectedMaskId && mask.page === activePage.page)) return
@@ -3417,42 +3695,70 @@ function ImageOcclusionLab({ analysis, premium }: { analysis?: PdfAnalysis | nul
             Coordinate salvate in percentuale: il backend può ricostruire la maschera anche se la pagina viene
             mostrata a dimensioni diverse.
           </p>
-          {activeMasks.length ? activeMasks.map((mask, index) => (
-            <article className={mask.id === selectedMaskId ? 'selected' : ''} key={mask.id}>
-              <button className="occlusion-card-index" onClick={() => setSelectedMaskId(mask.id)} type="button">{index + 1}</button>
-              <label>
-                Label
-                <input onChange={(event) => updateMask(mask.id, { label: event.target.value })} value={mask.label} />
-              </label>
-              <label>
-                Risposta
-                <input onChange={(event) => updateMask(mask.id, { answer: event.target.value })} value={mask.answer} />
-              </label>
-              <label>
-                Hint
-                <input onChange={(event) => updateMask(mask.id, { hint: event.target.value })} value={mask.hint} />
-              </label>
-              <div className="occlusion-position-grid">
-                {(['x', 'y', 'width', 'height'] as const).map((key) => (
-                  <label key={key}>
-                    {key === 'width' ? 'W' : key === 'height' ? 'H' : key.toUpperCase()} %
-                    <input
-                      max={100}
-                      min={0}
-                      onChange={(event) => updateMaskPercent(mask.id, key, event.target.value)}
-                      step={1}
-                      type="number"
-                      value={Math.round(mask[key] * 100)}
-                    />
+          {activeMasks.length ? activeMasks.map((mask, index) => {
+            const selected = mask.id === selectedMaskId
+            const label = mask.label || `${index + 1}`
+            const answer = mask.answer || `Struttura ${index + 1}`
+            return (
+              <article className={`occlusion-study-card ${selected ? 'selected' : ''}`} key={mask.id}>
+                <div className="occlusion-card-top">
+                  <button className="occlusion-card-index" onClick={() => setSelectedMaskId(mask.id)} type="button">{index + 1}</button>
+                  <div>
+                    <span>Flashcard visuale</span>
+                    <strong>{answer}</strong>
+                  </div>
+                  <button className="occlusion-focus-button" onClick={() => setSelectedMaskId(mask.id)} type="button">
+                    <Eye size={14} /> Evidenzia
+                  </button>
+                </div>
+
+                <div className="occlusion-study-prompt">
+                  <span>Domanda</span>
+                  <p>Quale struttura è indicata dall’area {label}?</p>
+                </div>
+
+                <div className="occlusion-fields">
+                  <label>
+                    Etichetta
+                    <input onChange={(event) => updateMask(mask.id, { label: event.target.value })} value={mask.label} />
                   </label>
-                ))}
-              </div>
-              <div className="occlusion-card-actions">
-                <small>x {Math.round(mask.x * 100)}% · y {Math.round(mask.y * 100)}% · w {Math.round(mask.width * 100)}% · h {Math.round(mask.height * 100)}%</small>
-                <button onClick={() => removeMask(mask.id)} type="button"><Trash2 size={14} /> Elimina</button>
-              </div>
-            </article>
-          )) : (
+                  <label>
+                    Risposta
+                    <input onChange={(event) => updateMask(mask.id, { answer: event.target.value })} value={mask.answer} />
+                  </label>
+                  <label className="field-wide">
+                    Hint
+                    <input onChange={(event) => updateMask(mask.id, { hint: event.target.value })} value={mask.hint} />
+                  </label>
+                </div>
+
+                <details className="occlusion-advanced">
+                  <summary>Coordinate normalizzate</summary>
+                  <div className="occlusion-position-grid">
+                    {(['x', 'y', 'width', 'height'] as const).map((key) => (
+                      <label key={key}>
+                        {key === 'width' ? 'W' : key === 'height' ? 'H' : key.toUpperCase()} %
+                        <input
+                          max={100}
+                          min={0}
+                          onChange={(event) => updateMaskPercent(mask.id, key, event.target.value)}
+                          step={1}
+                          type="number"
+                          value={Math.round(mask[key] * 100)}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <small>x {Math.round(mask.x * 100)}% · y {Math.round(mask.y * 100)}% · w {Math.round(mask.width * 100)}% · h {Math.round(mask.height * 100)}%</small>
+                </details>
+
+                <div className="occlusion-card-actions">
+                  <span><CheckCircle2 size={14} /> Quiz pronto</span>
+                  <button onClick={() => removeMask(mask.id)} type="button"><Trash2 size={14} /> Elimina</button>
+                </div>
+              </article>
+            )
+          }) : (
             <p className="occlusion-empty">Clicca sulla pagina o usa “Maschera” per creare la prima card visuale.</p>
           )}
         </div>
@@ -4057,9 +4363,11 @@ function restoredReaderSteps(analysis: PdfAnalysis): PipelineStep[] {
 function UploadPage({
   onRoute,
   onPublish,
+  user,
 }: {
   onRoute: (route: Route) => void
   onPublish: (document: DocumentItem) => number
+  user: AppAuthUser | null
 }) {
   const [restoredDraft, setRestoredDraft] = useState<UploadReaderDraft | null>(() => loadUploadReaderDraft())
   const [file, setFile] = useState<File | null>(null)
@@ -4260,7 +4568,7 @@ function UploadPage({
         })
       }
 
-      const { analyzePdf, compressPdfLossless, buildDocumentInsights } = await import('./lib/pdfProcessing')
+      const { analyzePdf, compressPdfLossless, buildDocumentInsights, applyDocumentOutline } = await import('./lib/pdfProcessing')
 
       let info = await analyzePdf(buffer)
       setAnalysis(info)
@@ -4315,6 +4623,48 @@ function UploadPage({
           } catch {
             patchStep('ocr', { status: 'done', detail: `${count} pagine in coda OCR · elaborazione non riuscita in questa sessione` })
           }
+        }
+      }
+
+      if (premium && info.outlineMeta?.aiRecommended && (info.outlineCandidates?.length ?? 0) >= 3) {
+        patchStep('finalize', { status: 'running', detail: 'Rifinitura indice Premium sui titoli candidati…' })
+        const refined = await generatePremiumOutline({
+          candidates: (info.outlineCandidates ?? []).slice(0, 220).map((heading) => ({
+            title: heading.title,
+            page: heading.page,
+            level: heading.level,
+            score: heading.score,
+            source: heading.source,
+            evidence: heading.evidence,
+          })),
+          pageCount: info.pageCount,
+          language: info.language,
+        })
+        if (refined.ok && refined.data.outline.length) {
+          info = applyDocumentOutline(info, refined.data.outline.map((heading, index) => ({
+            id: `llm-outline-${heading.page_start}-${index}`,
+            title: heading.title,
+            page: heading.page_start,
+            pageEnd: heading.page_end ?? undefined,
+            level: heading.level,
+            score: heading.confidence,
+            source: 'llm_validation',
+            sources: ['llm_validation'],
+            evidence: heading.source_candidate_titles?.join(', ') || 'rifinitura AI da candidati verificabili',
+          })), {
+            strategy: 'hybrid',
+            confidence: 0.82,
+            aiRecommended: false,
+            reasons: refined.data.cached
+              ? ['indice Premium recuperato da cache']
+              : ['indice Premium rifinito da candidati verificabili'],
+          })
+          setAnalysis(info)
+          setInsights(buildDocumentInsights(info))
+          saveUploadReaderDraft(inferredTitle || 'Documento caricato', info)
+          patchStep('finalize', { status: 'running', detail: refined.data.cached ? 'Indice Premium recuperato da cache' : 'Indice Premium rifinito' })
+        } else {
+          patchStep('finalize', { status: 'running', detail: 'Indice gratuito mantenuto' })
         }
       }
 
@@ -5120,8 +5470,12 @@ function UploadPage({
       {studyOpen && analysis ? (
         <FlashcardStudyModal
           cards={includedCards}
+          documentAuthor={professor.trim() || 'Autore non indicato'}
+          documentId={null}
           sentences={analysis.sentences}
+          subject={subject}
           title={title || file?.name || 'Documento'}
+          user={user}
           onClose={() => setStudyOpen(false)}
         />
       ) : null}
@@ -5155,6 +5509,8 @@ function UserDashboardPage({
   const [liveLoading, setLiveLoading] = useState(false)
   const [activeShelfId, setActiveShelfId] = useState<string | null>(null)
   const [sidePanel, setSidePanel] = useState<'notifications' | 'credits' | null>(null)
+  const [flashcardDashboard, setFlashcardDashboard] = useState<FlashcardDashboardData | null>(null)
+  const [flashcardFilters, setFlashcardFilters] = useState<FlashcardDashboardFilters>(EMPTY_FLASHCARD_FILTERS)
 
   // Deep-link to a dashboard section via #hash (from navbar / user menu).
   useEffect(() => {
@@ -5195,6 +5551,20 @@ function UserDashboardPage({
     }
   }, [user])
 
+  useEffect(() => {
+    let active = true
+    loadFlashcardDashboardData(user, documents)
+      .then((result) => {
+        if (active) setFlashcardDashboard(result)
+      })
+      .catch(() => {
+        if (active) setFlashcardDashboard(null)
+      })
+    return () => {
+      active = false
+    }
+  }, [documents, user])
+
   // Real persisted slices replace the preview only when the backend actually
   // returned rows; otherwise the generated content keeps the dashboard alive.
   const data = overlay
@@ -5206,12 +5576,38 @@ function UserDashboardPage({
     : baseData
   const displayCredits = overlay?.credits ?? credits
   const dataIsLive = Boolean(overlay)
+  const flashcardDataIsLive = flashcardDashboard?.source === 'live'
   const firstName = user.name.split(' ')[0] || 'Studente'
-  const totalFlashcards = data.decks.reduce((total, deck) => total + deck.cards, 0)
+  const flashcardRecords = flashcardDashboard?.records ?? []
+  const filteredFlashcardRecords = filterFlashcardRecords(flashcardRecords, flashcardFilters)
+  const totalFlashcards = flashcardRecords.length || data.decks.reduce((total, deck) => total + deck.cards, 0)
+  const flashcardStats = flashcardRecords.reduce(
+    (acc, record) => {
+      acc.correct += record.latestStatus === 'correct' ? 1 : 0
+      acc.incorrect += record.latestStatus === 'incorrect' ? 1 : 0
+      acc.unanswered += record.latestStatus === 'unanswered' ? 1 : 0
+      acc.needsReview += record.needsReview ? 1 : 0
+      acc.favorite += record.isFavorite ? 1 : 0
+      return acc
+    },
+    { correct: 0, incorrect: 0, unanswered: 0, needsReview: 0, favorite: 0 },
+  )
+  const flashcardAccuracy = flashcardStats.correct + flashcardStats.incorrect + flashcardStats.unanswered
+    ? Math.round((flashcardStats.correct / Math.max(1, flashcardStats.correct + flashcardStats.incorrect)) * 100)
+    : 0
   const dueReviews = data.reviews.length
   const averageProgress = data.subjectProgress.length
     ? Math.round(data.subjectProgress.reduce((total, item) => total + item.progress, 0) / data.subjectProgress.length)
     : 0
+  const uniqueFlashcardOptions = (key: keyof Pick<FlashcardStudyRecord, 'subject' | 'documentTitle' | 'documentAuthor' | 'chapter' | 'section' | 'topic'>) =>
+    Array.from(new Set(flashcardRecords.map((record) => record[key]).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+  const didacticQualityRows = flashcardDashboard?.authorPerformance?.documents.length
+    ? flashcardDashboard.authorPerformance.documents
+    : (flashcardDashboard?.documentQualities ?? []).slice(0, 3)
+  const didacticAverageQuality = flashcardDashboard?.authorPerformance?.averageQuality
+    ?? (didacticQualityRows.length
+      ? Math.round(didacticQualityRows.reduce((sum, item) => sum + (item.qualityPercent ?? 0), 0) / didacticQualityRows.length)
+      : null)
 
   const activeShelf = data.shelves.find((shelf) => shelf.id === activeShelfId)
     ?? data.shelves.find((shelf) => shelf.documents.length > 0)
@@ -5302,6 +5698,72 @@ function UserDashboardPage({
             <span className="dashboard-stat-sub">Da chiudere a breve</span>
           </span>
         </article>
+      </section>
+
+      <section className="dashboard-section flashcard-command-center" id="flashcard" style={{ scrollMarginTop: '90px' }}>
+        <div className="dashboard-section-head">
+          <div>
+            <h2>Ripassa i tuoi errori</h2>
+            <p>Flashcard persistenti per materia, documento, capitolo e argomento. Gli errori tornano qui finché non li chiudi davvero.</p>
+          </div>
+          <span className={`dashboard-live-badge ${flashcardDataIsLive ? 'live' : ''}`}>
+            {flashcardDataIsLive ? 'Live' : flashcardDashboard?.source === 'local' ? 'Locale' : 'Demo'}
+          </span>
+        </div>
+
+        <div className="flashcard-kpi-grid">
+          <article>
+            <strong>{totalFlashcards}</strong>
+            <span>flashcard totali</span>
+          </article>
+          <article className="good">
+            <strong>{flashcardStats.correct}</strong>
+            <span>corrette</span>
+          </article>
+          <article className="danger">
+            <strong>{flashcardStats.incorrect}</strong>
+            <span>sbagliate</span>
+          </article>
+          <article>
+            <strong>{flashcardStats.needsReview}</strong>
+            <span>da ripassare</span>
+          </article>
+          <article>
+            <strong>{flashcardAccuracy}%</strong>
+            <span>accuratezza</span>
+          </article>
+        </div>
+
+        <div className="mistake-review-grid">
+          {(flashcardDashboard?.errorGroups ?? []).slice(0, 6).map((group) => (
+            <button
+              className="mistake-review-card"
+              key={group.id}
+              onClick={() => {
+                setFlashcardFilters({
+                  ...EMPTY_FLASHCARD_FILTERS,
+                  subject: group.subject,
+                  documentTitle: group.documentTitle,
+                  chapter: group.chapter,
+                  topic: group.topic,
+                  status: 'needs_review',
+                })
+              }}
+              type="button"
+            >
+              <span><SubjectIcon compact name={group.subject} /></span>
+              <div>
+                <strong>{group.subject}</strong>
+                <p>{group.documentTitle}</p>
+                <small>{group.chapter} · {group.topic}</small>
+              </div>
+              <em>{group.incorrect || group.count} errori</em>
+            </button>
+          ))}
+          {!(flashcardDashboard?.errorGroups ?? []).length ? (
+            <p className="dashboard-empty">Non ci sono errori tracciati. Quando studi una card, le risposte sbagliate finiranno qui.</p>
+          ) : null}
+        </div>
       </section>
 
       {wallet ? (
@@ -5438,6 +5900,138 @@ function UserDashboardPage({
                 )}
               </div>
             ) : null}
+          </section>
+
+          <section className="dashboard-section flashcard-archive">
+            <div className="dashboard-section-head">
+              <div>
+                <h2>Archivio flashcard</h2>
+                <p>Filtra per materia, documento, autore, capitolo, sezione, argomento, stato e difficoltà.</p>
+              </div>
+              <button onClick={() => setFlashcardFilters(EMPTY_FLASHCARD_FILTERS)} type="button">
+                <RefreshCw size={15} /> Reset filtri
+              </button>
+            </div>
+
+            <div className="flashcard-filter-grid">
+              <label>
+                Materia
+                <select value={flashcardFilters.subject} onChange={(event) => setFlashcardFilters((current) => ({ ...current, subject: event.target.value }))}>
+                  <option value="all">Tutte</option>
+                  {uniqueFlashcardOptions('subject').map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
+              <label>
+                Documento
+                <select value={flashcardFilters.documentTitle} onChange={(event) => setFlashcardFilters((current) => ({ ...current, documentTitle: event.target.value }))}>
+                  <option value="all">Tutti</option>
+                  {uniqueFlashcardOptions('documentTitle').map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
+              <label>
+                Autore
+                <select value={flashcardFilters.author} onChange={(event) => setFlashcardFilters((current) => ({ ...current, author: event.target.value }))}>
+                  <option value="all">Tutti</option>
+                  {uniqueFlashcardOptions('documentAuthor').map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
+              <label>
+                Capitolo
+                <select value={flashcardFilters.chapter} onChange={(event) => setFlashcardFilters((current) => ({ ...current, chapter: event.target.value }))}>
+                  <option value="all">Tutti</option>
+                  {uniqueFlashcardOptions('chapter').map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
+              <label>
+                Argomento
+                <select value={flashcardFilters.topic} onChange={(event) => setFlashcardFilters((current) => ({ ...current, topic: event.target.value }))}>
+                  <option value="all">Tutti</option>
+                  {uniqueFlashcardOptions('topic').map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
+              <label>
+                Sezione
+                <select value={flashcardFilters.section} onChange={(event) => setFlashcardFilters((current) => ({ ...current, section: event.target.value }))}>
+                  <option value="all">Tutte</option>
+                  {uniqueFlashcardOptions('section').map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
+              <label>
+                Stato
+                <select value={flashcardFilters.status} onChange={(event) => setFlashcardFilters((current) => ({ ...current, status: event.target.value as FlashcardDashboardFilters['status'] }))}>
+                  <option value="all">Tutte</option>
+                  <option value="incorrect">Solo sbagliate</option>
+                  <option value="correct">Solo corrette</option>
+                  <option value="unanswered">Non completate</option>
+                  <option value="needs_review">Da ripassare</option>
+                  <option value="favorite">Preferite</option>
+                </select>
+              </label>
+              <label>
+                Difficoltà
+                <select value={flashcardFilters.difficulty} onChange={(event) => setFlashcardFilters((current) => ({ ...current, difficulty: event.target.value as FlashcardDashboardFilters['difficulty'] }))}>
+                  <option value="all">Tutte</option>
+                  <option value="easy">Facile</option>
+                  <option value="medium">Media</option>
+                  <option value="hard">Difficile</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="flashcard-archive-list">
+              {filteredFlashcardRecords.slice(0, 12).map((record) => (
+                <article className={`flashcard-archive-row ${record.latestStatus}`} key={record.id}>
+                  <div>
+                    <span className={`flashcard-status-pill ${record.latestStatus}`}>
+                      {record.latestStatus === 'correct' ? 'Corretta' : record.latestStatus === 'incorrect' ? 'Sbagliata' : record.latestStatus === 'partial' ? 'Quasi' : record.latestStatus === 'skipped' ? 'Saltata' : 'Da fare'}
+                    </span>
+                    {record.isFavorite ? <span className="flashcard-status-pill favorite">Preferita</span> : null}
+                    {record.needsReview ? <span className="flashcard-status-pill due">Ripasso</span> : null}
+                  </div>
+                  <div>
+                    <strong>{record.question}</strong>
+                    <small>{record.subject} · {record.documentTitle} · {record.chapter} · {record.topic}</small>
+                  </div>
+                  <em>{record.correct}/{Math.max(1, record.attempts)} corrette</em>
+                </article>
+              ))}
+              {!filteredFlashcardRecords.length ? (
+                <p className="dashboard-empty">Nessuna flashcard corrisponde ai filtri selezionati.</p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="dashboard-section author-quality-section">
+            <div className="dashboard-section-head">
+              <div>
+                <h2>Performance didattica dei materiali</h2>
+                <p>Quanto sono utili le flashcard generate dalle dispense: un segnale pratico sulla qualità dello studio.</p>
+              </div>
+              {didacticAverageQuality !== null ? <strong>{didacticAverageQuality}%</strong> : null}
+            </div>
+            {didacticQualityRows.length ? (
+              <div className="author-quality-grid">
+                {didacticQualityRows.map((quality) => (
+                  <article className="author-quality-card" key={quality.documentId}>
+                    <div>
+                      <strong>{quality.documentTitle}</strong>
+                      <span>{quality.reviewerCount} studenti · {quality.totalVotes} valutazioni</span>
+                    </div>
+                    <div className="author-quality-meter" aria-label={`Qualità flashcard ${quality.qualityPercent ?? 0}%`}>
+                      <span style={{ width: `${quality.qualityPercent ?? 0}%` }} />
+                    </div>
+                    <footer>
+                      <em>{quality.qualityPercent ?? 0}% utili</em>
+                      <small>
+                        Meglio: {quality.topPositiveTopic ?? 'non ancora chiaro'} · Da migliorare: {quality.mostProblematicTopic ?? 'nessun pattern'}
+                      </small>
+                    </footer>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="dashboard-empty">Quando i tuoi materiali riceveranno valutazioni sulle flashcard, vedrai qui capitoli forti e punti da migliorare.</p>
+            )}
           </section>
 
           <section className="dashboard-section">
@@ -6306,7 +6900,7 @@ function App() {
         />
       ) : null}
       {route === 'premium' ? <PremiumPage onRoute={navigateRoute} /> : null}
-      {route === 'upload' ? <UploadPage onRoute={navigateRoute} onPublish={publishUpload} /> : null}
+      {route === 'upload' ? <UploadPage onRoute={navigateRoute} onPublish={publishUpload} user={authUser} /> : null}
       {route === 'library' || route === 'dashboard' ? (
         authUser ? (
           <UserDashboardPage

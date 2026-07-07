@@ -44,6 +44,7 @@ export const config = {
     memo: env('AI_MEMO_PROMPT_VERSION', 'memo_v1'),
     visualize: env('AI_VISUALIZE_PROMPT_VERSION', 'visualize_v1'),
     imageOcclusion: env('AI_IMAGE_OCCLUSION_PROMPT_VERSION', 'image_occlusion_v2'),
+    outline: env('AI_OUTLINE_PROMPT_VERSION', 'outline_v1'),
   },
 
   limits: {
@@ -59,6 +60,9 @@ export const config = {
     maxHighlightChars: num('MAX_HIGHLIGHT_SELECTION_CHARS', 8000),
     maxImageBase64Chars: num('MAX_IMAGE_BASE64_CHARS', 12_000_000),
     maxCardsPerGeneration: num('AI_MAX_CARDS_PER_GENERATION', 40),
+    outlineRefinementsPerMonth: num('PREMIUM_MAX_OUTLINE_REFINEMENTS_PER_MONTH', 120),
+    maxOutlineCandidates: num('AI_MAX_OUTLINE_CANDIDATES', 220),
+    outlineMaxTokens: num('AI_OUTLINE_MAX_TOKENS', 2200),
   },
 }
 
@@ -70,3 +74,4 @@ export type AiFeature =
   | 'visualize'
   | 'flashcards'
   | 'image_occlusion'
+  | 'outline'

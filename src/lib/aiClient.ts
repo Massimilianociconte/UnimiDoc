@@ -68,6 +68,24 @@ export type PremiumGeneratedFlashcard = {
   tags?: string[]
 }
 
+export type PremiumOutlineCandidate = {
+  title: string
+  page: number
+  level?: number
+  score?: number
+  source?: string
+  evidence?: string
+}
+
+export type PremiumOutlineEntry = {
+  title: string
+  level: 1 | 2 | 3
+  page_start: number
+  page_end: number | null
+  confidence: number
+  source_candidate_titles?: string[]
+}
+
 export function requestAiHelp(payload: {
   mode: AiHelpMode
   question: string
@@ -95,6 +113,15 @@ export function generatePremiumFlashcards(payload: {
   return callFunction('generate-flashcards', payload)
 }
 
+export function generatePremiumOutline(payload: {
+  candidates: PremiumOutlineCandidate[]
+  pageCount: number
+  language?: string
+  documentId?: string
+}): Promise<AiClientResult<{ outline: PremiumOutlineEntry[]; notes?: string[]; cached: boolean; premium?: boolean }>> {
+  return callFunction('generate-outline', payload)
+}
+
 export function autoDetectOcclusion(payload: {
   imageBase64: string
   mimeType?: string
@@ -114,6 +141,8 @@ export function submitSrsReview(payload: {
   correctAnswer?: string
   timeSpentMs?: number
   quizSessionId?: string
+  recordAnswer?: boolean
+  recordProgress?: boolean
 }): Promise<AiClientResult<{ srs: unknown }>> {
   return callFunction('srs-review', payload)
 }
