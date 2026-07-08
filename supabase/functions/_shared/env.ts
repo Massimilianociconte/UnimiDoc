@@ -11,15 +11,33 @@ const num = (key: string, fallback: number): number => {
   return raw && Number.isFinite(parsed) ? parsed : fallback
 }
 
+const DEFAULT_CORS_ALLOW_ORIGINS = [
+  'https://unimidoc.it',
+  'https://www.unimidoc.it',
+  'https://unimidoc.netlify.app',
+  'http://127.0.0.1:5173',
+  'http://localhost:5173',
+]
+
+function csvList(value: string): string[] {
+  return value
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)]
+}
+
+const configuredCorsOrigins = csvList(env('CORS_ALLOW_ORIGINS', env('CORS_ALLOW_ORIGIN', '')))
+
 export const config = {
   supabaseUrl: env('SUPABASE_URL'),
   serviceRoleKey: env('SUPABASE_SERVICE_ROLE_KEY'),
   anonKey: env('SUPABASE_ANON_KEY'),
   corsOrigin: env('CORS_ALLOW_ORIGIN', ''),
-  corsOrigins: env('CORS_ALLOW_ORIGINS', env('CORS_ALLOW_ORIGIN', ''))
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean),
+  corsOrigins: unique([...configuredCorsOrigins, ...DEFAULT_CORS_ALLOW_ORIGINS]),
 
   deepseek: {
     apiKey: env('DEEPSEEK_API_KEY'),

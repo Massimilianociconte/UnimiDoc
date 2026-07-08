@@ -47,7 +47,7 @@ Production secrets must include a strict CORS allowlist rather than `*`:
 
 ```ini
 CORS_ALLOW_ORIGIN=https://unimidoc.it
-CORS_ALLOW_ORIGINS=https://unimidoc.it,http://127.0.0.1:5173,http://localhost:5173
+CORS_ALLOW_ORIGINS=https://unimidoc.it,https://www.unimidoc.it,https://unimidoc.netlify.app,http://127.0.0.1:5173,http://localhost:5173
 DEEPSEEK_MODEL=deepseek-v4-flash
 GEMINI_VISION_MODEL=gemini-3-flash-preview
 MAX_IMAGE_BASE64_CHARS=12000000
