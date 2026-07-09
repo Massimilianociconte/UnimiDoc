@@ -1,4 +1,4 @@
-// POST /functions/v1/rag-index  { documentId, force? }
+// POST /functions/v1/rag-index  { documentId, force?, pages? }
 //
 // Indexes a document for RAG: ensures pdf_chunks exist (building them from the
 // stored per-page text when absent — reusing the flashcard pipeline's chunk
@@ -6,6 +6,12 @@
 // EmbeddingProvider, and upserts them into rag_chunk_embeddings. Heavy work is
 // NOT run at upload time or inside a user query — this endpoint is the async
 // worker the dashboard triggers ("Avvia analisi") and polls via rag-status.
+//
+// `pages` (optional): [{ pageNumber, text }] — the extracted per-page text the
+// uploader's browser already produced (pdfjs + tesseract OCR). Accepted ONLY
+// from the document OWNER, validated and persisted server-side into pdf_pages.
+// The client prepares text; the backend remains the authority on what is
+// stored, chunked and embedded. The PDF itself never enters the database.
 //
 // Access: any user who can access the document (owner / buyer / published) may
 // trigger indexing; embeddings belong to the document owner and are shared
@@ -20,6 +26,28 @@ import { chunkPages } from '../_shared/chunking.ts'
 const CHUNK_CAP: Record<string, number> = { free: 120, base: 300, premium: 800 }
 const EMBED_BATCH = 64
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+// Sanity caps for owner-submitted page text (a 2000-page book is ~the ceiling).
+const MAX_PAGES_PAYLOAD = 2000
+const MAX_PAGE_TEXT_CHARS = 20_000
+
+type PagePayload = { pageNumber: number; text: string }
+
+function parsePagesPayload(raw: unknown): PagePayload[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null
+  if (raw.length > MAX_PAGES_PAYLOAD) throw errors.badRequest(`Troppe pagine (max ${MAX_PAGES_PAYLOAD}).`)
+  const seen = new Set<number>()
+  const pages: PagePayload[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const pageNumber = Number((item as PagePayload).pageNumber)
+    const text = String((item as PagePayload).text ?? '').trim()
+    if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > MAX_PAGES_PAYLOAD) continue
+    if (seen.has(pageNumber) || text.length === 0) continue
+    seen.add(pageNumber)
+    pages.push({ pageNumber, text: text.slice(0, MAX_PAGE_TEXT_CHARS) })
+  }
+  return pages.length > 0 ? pages : null
+}
 
 type DbChunk = {
   id: string
@@ -49,6 +77,7 @@ type DbChunk = {
     if (!UUID_RE.test(documentId)) throw errors.badRequest('documentId non valido.')
     activeDocumentId = documentId
     const force = Boolean(body.force)
+    const pagesPayload = parsePagesPayload(body.pages)
 
     const { data: doc } = await admin
       .from('documents')
@@ -63,8 +92,14 @@ type DbChunk = {
     const hasAccess = (accessible ?? []).some((row: { document_id: string }) => row.document_id === documentId)
     if (!hasAccess) throw errors.paywall('Non hai accesso a questo documento.')
 
-    // Already indexed → no-op unless force.
-    if (!force && doc.rag_status === 'indexed') {
+    // Page text may be supplied ONLY by the uploader — a buyer must never be
+    // able to poison someone else's document content.
+    if (pagesPayload && doc.owner_id !== userId) {
+      throw errors.badRequest('Solo il proprietario può fornire il testo del documento.')
+    }
+
+    // Already indexed → no-op unless force or fresh page text to ingest.
+    if (!force && !pagesPayload && doc.rag_status === 'indexed') {
       return jsonResponse({ documentId, status: 'indexed', skipped: true }, 200, req)
     }
 
@@ -87,6 +122,27 @@ type DbChunk = {
       .single()
     jobId = job?.id ?? null
     await admin.from('documents').update({ rag_status: 'processing' }).eq('id', documentId)
+
+    // 0) Persist owner-submitted page text into pdf_pages (validated above),
+    //    then drop existing chunks so they are rebuilt from the fresh text.
+    //    Deleting chunks cascades to their embeddings; identical text is
+    //    re-attached at near-zero cost via the content_hash reuse below.
+    if (pagesPayload) {
+      const pageRows = pagesPayload.map((p) => ({
+        document_id: documentId,
+        owner_id: doc.owner_id,
+        page_number: p.pageNumber,
+        native_text: p.text,
+        native_text_chars: p.text.length,
+      }))
+      const { error: pagesErr } = await admin
+        .from('pdf_pages')
+        .upsert(pageRows, { onConflict: 'document_id,page_number' })
+      if (pagesErr) throw errors.badRequest(`Salvataggio testo pagine non riuscito: ${pagesErr.message}`)
+
+      const { error: dropErr } = await admin.from('pdf_chunks').delete().eq('document_id', documentId)
+      if (dropErr) throw errors.badRequest(`Reset chunk non riuscito: ${dropErr.message}`)
+    }
 
     // 1) Ensure chunks exist (reuse pdf_chunks; build from pdf_pages if empty).
     let { data: chunks } = await admin

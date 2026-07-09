@@ -92,6 +92,7 @@ import {
   getSupabaseSessionUser,
   getUserCreditBalance,
   isSupabaseConfigured,
+  supabase,
   requestPasswordReset,
   signInWithEmail,
   signInWithGoogle,
@@ -113,8 +114,10 @@ import { getPremiumState, refreshPremiumState, setPremiumState } from './lib/ent
 import { AskDocumentPanel } from './components/rag/AskDocumentPanel'
 import {
   autoDetectOcclusion,
+  createDocumentUpload,
   generatePremiumFlashcards as generateBackendPremiumFlashcards,
   generatePremiumOutline,
+  ragIndexDocument,
   requestAiHelp,
   setAccessTokenProvider,
   submitSrsReview,
@@ -4323,6 +4326,25 @@ function loadUploadReaderDraft(): UploadReaderDraft | null {
   }
 }
 
+async function sha256HexOfBytes(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes.slice().buffer)
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+// Ricostruisce il testo per pagina dalle sentence già estratte (pdfjs + OCR):
+// è il payload che rag-index valida e persiste in pdf_pages lato server.
+function pageTextsFromAnalysis(info: PdfAnalysis): Array<{ pageNumber: number; text: string }> {
+  const byPage = new Map<number, string[]>()
+  for (const sentence of info.sentences) {
+    const list = byPage.get(sentence.page)
+    if (list) list.push(sentence.text)
+    else byPage.set(sentence.page, [sentence.text])
+  }
+  return [...byPage.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([pageNumber, texts]) => ({ pageNumber, text: texts.join('\n') }))
+}
+
 function saveUploadReaderDraft(title: string, analysis: PdfAnalysis): void {
   if (typeof window === 'undefined') return
   try {
@@ -4400,6 +4422,10 @@ function UploadPage({
   const [analysis, setAnalysis] = useState<PdfAnalysis | null>(() => restoredDraft?.analysis ?? null)
   const [insights, setInsights] = useState<DocumentInsights | null>(null)
   const [compression, setCompression] = useState<CompressionResult | null>(null)
+  // Byte del PDF finale (post conversione Word e post compressione): sono i
+  // byte realmente caricati su Storage — il PDF non entra mai nel database.
+  const pdfBytesRef = useRef<Uint8Array | null>(null)
+  const [cloudState, setCloudState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   const [cards, setCards] = useState<Flashcard[]>([])
   const [reviewCardIndex, setReviewCardIndex] = useState(0)
   const [approvedCardIds, setApprovedCardIds] = useState<Set<string>>(() => new Set())
@@ -4574,6 +4600,7 @@ function UploadPage({
       const { analyzePdf, compressPdfLossless, buildDocumentInsights, applyDocumentOutline } = await import('./lib/pdfProcessing')
 
       let info = await analyzePdf(buffer)
+      pdfBytesRef.current = new Uint8Array(buffer)
       setAnalysis(info)
       // Metadatazione SEO/GEO automatica: keywords, argomenti, abstract, flag
       // contenuto e livello estratti dal testo reale (nessun costo AI).
@@ -4589,6 +4616,7 @@ function UploadPage({
         patchStep('compress', { status: 'running', detail: 'Riscrittura con object stream…' })
         const result = await compressPdfLossless(buffer)
         setCompression(result)
+        if (!result.alreadyOptimized) pdfBytesRef.current = result.data
         patchStep('compress', {
           status: 'done',
           detail: result.alreadyOptimized
@@ -4855,6 +4883,49 @@ function UploadPage({
   }
   const canPublish = phase === 'ready' && Boolean(file) && Boolean(title.trim()) && Boolean(subject) && Boolean(professor.trim()) && rights
 
+  // Upload reale su Supabase: documento (draft privato) → PDF su Storage via
+  // signed URL → testo pagine a rag-index, che lo valida, salva pdf_pages,
+  // ricostruisce i chunk e genera gli embedding. Il PDF resta SOLO in Storage;
+  // nel database vanno solo chunk, metadati ed embedding. Best-effort: se
+  // fallisce (offline/demo), il flusso locale continua comunque.
+  const publishToBackend = async (): Promise<{ ok: boolean; message?: string }> => {
+    if (!user || user.isDemo || !isSupabaseConfigured || !supabase) return { ok: false, message: 'non_configurato' }
+    const bytes = pdfBytesRef.current
+    if (!bytes || !analysis) return { ok: false, message: 'byte PDF non disponibili (ricarica il file)' }
+
+    const sha = await sha256HexOfBytes(bytes)
+    const baseName = (file?.name ?? 'documento.pdf').replace(/\.(docx?|DOCX?)$/, '.pdf')
+    const created = await createDocumentUpload({
+      title: title.trim(),
+      courseName: subject,
+      originalFileSha256: sha,
+      originalSizeBytes: bytes.byteLength,
+      mimeType: 'application/pdf',
+      fileName: baseName,
+      professor: professor.trim(),
+      academicYear: year,
+      description: description.trim() || undefined,
+      examType,
+      semester: semester || undefined,
+      tags: tagsInput.split(',').map((tag) => tag.trim()).filter(Boolean).slice(0, 10),
+    })
+    if (!created.ok) return { ok: false, message: created.message }
+
+    const uploadPath = created.data.path ?? created.data.storagePath
+    const { error: uploadError } = await supabase.storage
+      .from(created.data.storageBucket)
+      .uploadToSignedUrl(uploadPath, created.data.token ?? '', bytes.slice().buffer, { contentType: 'application/pdf' })
+    if (uploadError) return { ok: false, message: `upload Storage: ${uploadError.message}` }
+
+    const indexed = await ragIndexDocument({
+      documentId: created.data.documentId,
+      force: true,
+      pages: pageTextsFromAnalysis(analysis),
+    })
+    if (!indexed.ok) return { ok: false, message: `indicizzazione: ${indexed.message}` }
+    return { ok: true }
+  }
+
   const publish = () => {
     if (!file) return
     if (!title.trim()) return setError('Aggiungi un titolo al documento.')
@@ -4924,6 +4995,16 @@ function UploadPage({
     setEarned(awarded)
     setPhase('published')
     window.scrollTo({ left: 0, top: 0, behavior: 'smooth' })
+
+    // Salvataggio cloud in parallelo alla conferma locale: PDF su Storage,
+    // testo+embedding nel DB. Lo stato è mostrato nel pannello post-publish.
+    setCloudState('saving')
+    void publishToBackend().then((result) => {
+      setCloudState(result.ok ? 'saved' : 'failed')
+      if (!result.ok && result.message && result.message !== 'non_configurato') {
+        console.warn('Salvataggio cloud non riuscito:', result.message)
+      }
+    })
   }
 
   const compressionBadge = compression
@@ -4996,6 +5077,15 @@ function UploadPage({
           <span className="upload-success-icon"><CheckCircle2 size={30} /></span>
           <h2>Inviato in revisione</h2>
           <p>“{title}” è nella coda di moderazione. Ti avvisiamo appena viene pubblicato.</p>
+          {cloudState !== 'idle' ? (
+            <p className={`upload-cloud-state is-${cloudState}`}>
+              {cloudState === 'saving'
+                ? 'Salvataggio cloud in corso: PDF su storage sicuro e testo indicizzato per la ricerca intelligente…'
+                : cloudState === 'saved'
+                  ? 'Salvato nel cloud: documento archiviato e indicizzato per la ricerca intelligente (Chiedi al documento).'
+                  : 'Salvataggio cloud non riuscito: il documento resta disponibile in locale. Riprova dal tuo account.'}
+            </p>
+          ) : null}
           <div className="upload-success-stats">
             <div><strong><CreditIcon size="lg" /> +{earned}</strong><span>crediti guadagnati</span></div>
             <div>

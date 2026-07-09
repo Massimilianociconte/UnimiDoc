@@ -4,15 +4,18 @@
 // model keeps the SAME dimension as the rag_chunk_embeddings.embedding column
 // (768) OR a migration changes that column and embeddings are regenerated.
 //
-// Current provider: Google Gemini `text-embedding-004` (768 dims). GEMINI_API_KEY
-// is already configured for the vision features, so no new secret is required.
+// Current provider: Google Gemini `gemini-embedding-001` with outputDimensionality
+// 768 (the GA embedding model on the same API that already serves the vision
+// model). GEMINI_API_KEY is already configured, so no new secret is required.
+// Cosine similarity is scale-invariant, so sub-3072 dims (which Gemini returns
+// un-normalised) still rank correctly under pgvector's vector_cosine_ops.
 
 import { config } from './env.ts'
 import { errors, fetchWithRetry } from './http.ts'
 
 export interface EmbeddingProvider {
   readonly modelName: string
-  readonly embeddingModelId: string // stored in embedding_model, e.g. "gemini/text-embedding-004"
+  readonly embeddingModelId: string // stored in embedding_model, e.g. "gemini/gemini-embedding-001"
   readonly embeddingVersion: string
   readonly dimensions: number
   embedText(text: string, kind?: EmbeddingKind): Promise<number[]>
@@ -24,7 +27,7 @@ export type EmbeddingKind = 'document' | 'query'
 
 // deno-lint-ignore no-explicit-any
 const geminiEnv = (globalThis as any).Deno?.env
-const EMBEDDING_MODEL = geminiEnv?.get('GEMINI_EMBEDDING_MODEL') ?? 'text-embedding-004'
+const EMBEDDING_MODEL = geminiEnv?.get('GEMINI_EMBEDDING_MODEL') ?? 'gemini-embedding-001'
 const EMBEDDING_DIMENSIONS = Number(geminiEnv?.get('RAG_EMBEDDING_DIMENSIONS') ?? '768')
 const EMBEDDING_VERSION = geminiEnv?.get('RAG_EMBEDDING_VERSION') ?? '1'
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta'

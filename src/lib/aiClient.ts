@@ -193,7 +193,12 @@ export function callRagFunction<T>(name: string, payload: unknown): Promise<AiCl
   return callFunction<T>(name, payload)
 }
 
-export function ragIndexDocument(payload: { documentId: string; force?: boolean }): Promise<
+export function ragIndexDocument(payload: {
+  documentId: string
+  force?: boolean
+  /** Per-page text extracted in the uploader's browser (owner only, validated server-side). */
+  pages?: Array<{ pageNumber: number; text: string }>
+}): Promise<
   AiClientResult<{ documentId: string; status: string; chunksTotal?: number; chunksEmbedded?: number; chunkCap?: number; embeddingModel?: string; dimensions?: number }>
 > {
   return callFunction('rag-index', payload)
