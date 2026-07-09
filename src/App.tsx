@@ -110,6 +110,7 @@ import type {
 } from './lib/pdfProcessing'
 import { calculateNextReview, evaluateTextAnswer, type AnswerStatus, type SrsRating, type SrsState } from './lib/studyEngine'
 import { getPremiumState, refreshPremiumState, setPremiumState } from './lib/entitlements'
+import { AskDocumentPanel } from './components/rag/AskDocumentPanel'
 import {
   autoDetectOcclusion,
   generatePremiumFlashcards as generateBackendPremiumFlashcards,
@@ -1410,6 +1411,8 @@ function DocumentPage({
           </div>
         ) : null}
       </section>
+
+      <AskDocumentPanel documentId={doc.id} documentTitle={doc.title} onOpenPage={() => onPreview(doc)} />
 
       {insights?.abstract || insights?.topics.length ? (
         <section className="document-insights">

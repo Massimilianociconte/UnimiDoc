@@ -181,6 +181,39 @@ export function createDocumentUpload(payload: {
   return callFunction('document-upload', payload)
 }
 
+// --------------------------------------------------------------------------
+// RAG (Retrieval-Augmented Generation) — pgvector-backed. The UI should call
+// these through src/lib/rag/provider.ts, not directly, so retrieval stays
+// swappable (see the RagRetrievalProvider abstraction).
+// --------------------------------------------------------------------------
+export type RagFunctionResult<T> = AiClientResult<T>
+
+/** Generic RAG edge-function call (re-exported callFunction for the rag lib). */
+export function callRagFunction<T>(name: string, payload: unknown): Promise<AiClientResult<T>> {
+  return callFunction<T>(name, payload)
+}
+
+export function ragIndexDocument(payload: { documentId: string; force?: boolean }): Promise<
+  AiClientResult<{ documentId: string; status: string; chunksTotal?: number; chunksEmbedded?: number; chunkCap?: number; embeddingModel?: string; dimensions?: number }>
+> {
+  return callFunction('rag-index', payload)
+}
+
+export function fetchRagStatus(payload: { documentIds: string[] }): Promise<
+  AiClientResult<{
+    statuses: Array<{
+      documentId: string
+      status: 'not_indexed' | 'queued' | 'processing' | 'indexed' | 'partial' | 'failed'
+      chunkCount: number
+      indexVersion: number
+      indexedAt: string | null
+      job: { status: string; chunksTotal: number; chunksEmbedded: number; error: string | null } | null
+    }>
+  }>
+> {
+  return callFunction('rag-status', payload)
+}
+
 export function requestDocumentAccess(payload: { documentId: string }): Promise<AiClientResult<{
   documentId: string
   fullAccess: boolean
