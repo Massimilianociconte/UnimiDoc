@@ -30,7 +30,7 @@ function normalizeForScan(text: string): string {
     // collapse spaced-out letters used to dodge filters: "t e l e g r a m"
     .replace(/\b(?:\w\s){3,}\w\b/g, (run) => run.replace(/\s+/g, ''))
     // unify separators
-    .replace(/[_\-]+/g, ' ')
+    .replace(/[_-]+/g, ' ')
     .replace(/\s{2,}/g, ' ')
 }
 

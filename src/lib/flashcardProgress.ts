@@ -31,6 +31,7 @@ export type FlashcardStudyRecord = {
   isFavorite: boolean
   needsReview: boolean
   page: number | null
+  sourceQuote?: string | null
   tags: string[]
   qualityVote?: FlashcardQualityVote
 }
@@ -84,7 +85,7 @@ export type FlashcardDashboardData = {
   errorGroups: FlashcardReviewGroup[]
   documentQualities: DocumentFlashcardQuality[]
   authorPerformance: AuthorDidacticPerformance | null
-  source: 'live' | 'local' | 'demo'
+  source: 'live' | 'local' | 'demo' | 'empty'
 }
 
 export const EMPTY_FLASHCARD_FILTERS: FlashcardDashboardFilters = {
@@ -106,7 +107,7 @@ type LocalStore = {
   documentQualities: DocumentFlashcardQuality[]
 }
 
-type StudyContext = {
+export type StudyContext = {
   documentId?: string | null
   documentTitle: string
   documentAuthor?: string
@@ -156,6 +157,21 @@ type QualityRollupRow = {
   most_problematic_topic: string | null
 }
 
+type FlashcardRow = {
+  id: string
+  document_id: string
+  front: string
+  back: string
+  tags: string[] | null
+  difficulty: 'easy' | 'medium' | 'hard' | null
+  source_page_start: number | null
+  source_quote: string | null
+  subject: string | null
+  chapter_title: string | null
+  section_title: string | null
+  topic: string | null
+}
+
 function storageKey(userId: string): string {
   return `${STORAGE_PREFIX}${userId}`
 }
@@ -184,8 +200,16 @@ function saveLocalStore(userId: string, store: LocalStore): void {
   }
 }
 
-function stableCardId(card: Flashcard): string {
-  return UUID_RE.test(card.id) ? card.id : card.id
+function stableCardId(card: Flashcard, context: StudyContext): string {
+  if (UUID_RE.test(card.id)) return card.id
+  const documentScope = context.documentId?.trim()
+    || context.documentTitle.trim().toLocaleLowerCase('it').replace(/\s+/g, '-')
+    || 'documento-locale'
+  return `${documentScope}:${card.id}`
+}
+
+export function flashcardProgressId(card: Flashcard, context: StudyContext): string {
+  return stableCardId(card, context)
 }
 
 export function isPersistedFlashcardId(id: string): boolean {
@@ -208,8 +232,8 @@ function recordFromCard(card: Flashcard, context: StudyContext): FlashcardStudyR
   const chapter = card.ref?.section ?? 'Senza capitolo'
   const topic = topicFromCard(card)
   return {
-    id: stableCardId(card),
-    flashcardId: stableCardId(card),
+    id: stableCardId(card, context),
+    flashcardId: stableCardId(card, context),
     documentId: context.documentId ?? null,
     documentTitle: context.documentTitle || 'Documento senza titolo',
     documentAuthor: context.documentAuthor || 'Autore non indicato',
@@ -258,7 +282,7 @@ export function recordLocalFlashcardOutcome(
 ): FlashcardStudyRecord {
   const store = loadLocalStore(userId)
   const normalized = normalizeStatus(status)
-  const flashcardId = stableCardId(card)
+  const flashcardId = stableCardId(card, context)
   const existing = store.records.find((record) => record.flashcardId === flashcardId)
   const base = existing ?? recordFromCard(card, context)
   const updated = applyOutcome(base, normalized, srs)
@@ -298,7 +322,7 @@ export function setLocalFlashcardQualityVote(
   vote: FlashcardQualityVote,
 ): FlashcardStudyRecord {
   const store = loadLocalStore(userId)
-  const flashcardId = stableCardId(card)
+  const flashcardId = stableCardId(card, context)
   const existing = store.records.find((record) => record.flashcardId === flashcardId)
   const updated = { ...(existing ?? recordFromCard(card, context)), qualityVote: vote }
   const records = [updated, ...store.records.filter((record) => record.flashcardId !== flashcardId)]
@@ -337,13 +361,38 @@ export async function recordRemoteFlashcardOutcome(
   }
 }
 
+export async function loadRemoteFlashcardSrs(flashcardIds: string[]): Promise<Record<string, SrsState>> {
+  if (!supabase) return {}
+  const ids = [...new Set(flashcardIds.filter(isPersistedFlashcardId))]
+  if (ids.length === 0) return {}
+  try {
+    const { data, error } = await supabase
+      .from('srs_state')
+      .select('flashcard_id, due_at, last_reviewed_at, review_count, lapse_count, ease_factor, interval_minutes, last_rating, stage')
+      .in('flashcard_id', ids)
+    if (error) return {}
+    return Object.fromEntries((data ?? []).map((row) => [row.flashcard_id, {
+      dueAt: row.due_at,
+      lastReviewedAt: row.last_reviewed_at,
+      reviewCount: row.review_count,
+      lapseCount: row.lapse_count,
+      easeFactor: row.ease_factor,
+      intervalMinutes: row.interval_minutes,
+      lastRating: row.last_rating,
+      stage: row.stage,
+    } satisfies SrsState]))
+  } catch {
+    return {}
+  }
+}
+
 export async function setRemoteFlashcardFavorite(flashcardId: string, isFavorite: boolean): Promise<boolean> {
   if (!supabase || !isPersistedFlashcardId(flashcardId)) return false
   try {
-    const { error } = await supabase
-      .from('user_flashcard_progress')
-      .update({ is_favorite: isFavorite })
-      .eq('flashcard_id', flashcardId)
+    const { error } = await supabase.rpc('set_flashcard_favorite', {
+      p_flashcard_id: flashcardId,
+      p_is_favorite: isFavorite,
+    })
     return !error
   } catch {
     return false
@@ -453,29 +502,90 @@ function mapProgressRow(row: ProgressRow, votes: Map<string, FlashcardQualityVot
   }
 }
 
+function mapUnansweredCard(
+  row: FlashcardRow,
+  document: { title: string; author: string } | undefined,
+  votes: Map<string, FlashcardQualityVote>,
+): FlashcardStudyRecord {
+  return {
+    id: `unanswered-${row.id}`,
+    flashcardId: row.id,
+    documentId: row.document_id,
+    documentTitle: document?.title ?? 'Documento',
+    documentAuthor: document?.author ?? 'Autore non indicato',
+    subject: row.subject ?? 'Materia non classificata',
+    chapter: row.chapter_title ?? 'Senza capitolo',
+    section: row.section_title ?? row.chapter_title ?? 'Senza sezione',
+    topic: row.topic ?? row.section_title ?? row.chapter_title ?? 'Concetto generale',
+    question: row.front,
+    answer: row.back,
+    latestStatus: 'unanswered',
+    attempts: 0,
+    correct: 0,
+    incorrect: 0,
+    partial: 0,
+    skipped: 0,
+    lastReviewedAt: null,
+    nextDueAt: null,
+    difficulty: row.difficulty ?? 'medium',
+    isFavorite: false,
+    needsReview: false,
+    page: row.source_page_start,
+    sourceQuote: row.source_quote,
+    tags: row.tags ?? [],
+    qualityVote: votes.get(row.id),
+  }
+}
+
 async function loadRemoteDashboard(user: AppAuthUser, documents: DocumentItem[]): Promise<FlashcardDashboardData | null> {
   if (!supabase || user.isDemo) return null
   try {
-    const [progress, votes, rollups] = await Promise.all([
+    const [progress, cards, votes, rollups, ownedDocuments] = await Promise.all([
       supabase
         .from('user_flashcard_progress')
         .select('*')
         .order('updated_at', { ascending: false })
         .limit(500),
       supabase
+        .from('flashcards')
+        .select('id, document_id, front, back, tags, difficulty, source_page_start, source_quote, subject, chapter_title, section_title, topic')
+        .neq('status', 'deleted')
+        .order('created_at', { ascending: false })
+        .limit(500),
+      supabase
         .from('flashcard_quality_votes')
         .select('flashcard_id, vote')
         .eq('owner_id', user.id),
       supabase
-        .from('document_flashcard_quality_rollups')
+        .from('public_document_flashcard_quality')
         .select('*')
         .order('quality_percent', { ascending: false, nullsFirst: false })
         .limit(80),
+      supabase
+        .from('documents')
+        .select('id, title, professor')
+        .eq('owner_id', user.id),
     ])
-    if (progress.error || votes.error || rollups.error) return null
+    if (progress.error || cards.error || votes.error || rollups.error) return null
 
     const voteMap = new Map(((votes.data as QualityVoteRow[] | null) ?? []).map((row) => [row.flashcard_id, row.vote]))
-    const records = ((progress.data as ProgressRow[] | null) ?? []).map((row) => mapProgressRow(row, voteMap))
+    const cardRows = (cards.data as FlashcardRow[] | null) ?? []
+    const cardById = new Map(cardRows.map((card) => [card.id, card]))
+    const progressRecords = ((progress.data as ProgressRow[] | null) ?? []).map((row) => ({
+      ...mapProgressRow(row, voteMap),
+      sourceQuote: cardById.get(row.flashcard_id)?.source_quote ?? null,
+    }))
+    const progressedIds = new Set(progressRecords.map((record) => record.flashcardId))
+    const documentMeta = new Map<string, { title: string; author: string }>(
+      documents.map((document) => [document.id, { title: document.title, author: document.uploader }]),
+    )
+    for (const document of (ownedDocuments.data ?? []) as Array<{ id: string; title: string; professor: string | null }>) {
+      documentMeta.set(document.id, { title: document.title, author: user.name || document.professor || 'Tu' })
+    }
+    const unansweredRecords = cardRows
+      .filter((card) => !progressedIds.has(card.id))
+      .map((card) => mapUnansweredCard(card, documentMeta.get(card.document_id), voteMap))
+    const records = [...progressRecords, ...unansweredRecords]
     const docById = new Map(documents.map((document) => [document.id, document]))
     const documentQualities: DocumentFlashcardQuality[] = ((rollups.data as QualityRollupRow[] | null) ?? []).map((row) => {
       const document = docById.get(row.document_id)
@@ -518,6 +628,16 @@ export async function loadFlashcardDashboardData(user: AppAuthUser, documents: D
       documentQualities: localQualities,
       authorPerformance: authorPerformance(user, localQualities),
       source: 'local',
+    }
+  }
+
+  if (!user.isDemo) {
+    return {
+      records: [],
+      errorGroups: [],
+      documentQualities: [],
+      authorPerformance: null,
+      source: 'empty',
     }
   }
 

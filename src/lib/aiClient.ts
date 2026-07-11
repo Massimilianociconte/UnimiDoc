@@ -4,6 +4,8 @@
 // yet, calls resolve to a typed, non-throwing "not configured / login required"
 // result so the UI stays functional in the current no-auth demo.
 
+import type { SrsState } from './studyEngine'
+
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 // Prefer calling Supabase Edge Functions directly (CSP connect-src already
@@ -31,12 +33,17 @@ export type AiClientError = {
 }
 export type AiClientResult<T> = { ok: true; data: T } | AiClientError
 
-async function callFunction<T>(name: string, payload: unknown): Promise<AiClientResult<T>> {
+async function callFunction<T>(
+  name: string,
+  payload: unknown,
+  options: { requireAuth?: boolean } = {},
+): Promise<AiClientResult<T>> {
   if (!SUPABASE_URL) {
     return { ok: false, code: 'not_configured', message: 'Backend AI non configurato (imposta VITE_SUPABASE_URL).' }
   }
+  const requireAuth = options.requireAuth ?? true
   const token = await accessTokenProvider()
-  if (!token) {
+  if (requireAuth && !token) {
     return { ok: false, code: 'login_required', message: 'Accedi per usare le funzioni AI Premium.' }
   }
   try {
@@ -45,7 +52,7 @@ async function callFunction<T>(name: string, payload: unknown): Promise<AiClient
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(ANON_KEY ? { apikey: ANON_KEY } : {}),
       },
       body: JSON.stringify(payload),
@@ -58,6 +65,16 @@ async function callFunction<T>(name: string, payload: unknown): Promise<AiClient
   } catch (error) {
     return { ok: false, code: 'error', message: error instanceof Error ? error.message : 'Errore di rete' }
   }
+}
+
+/** Shared authenticated backend transport for non-AI product services. */
+export function callBackendFunction<T>(name: string, payload: unknown): Promise<AiClientResult<T>> {
+  return callFunction<T>(name, payload)
+}
+
+/** Public, read-only backend transport (the server still validates origin/rate limits). */
+export function callPublicBackendFunction<T>(name: string, payload: unknown): Promise<AiClientResult<T>> {
+  return callFunction<T>(name, payload, { requireAuth: false })
 }
 
 export type AiHelpMode = 'explain' | 'followup' | 'example' | 'memo' | 'visualize'
@@ -119,6 +136,41 @@ export function generatePremiumFlashcards(payload: {
   return callFunction('generate-flashcards', payload)
 }
 
+/**
+ * RAG mode: the SERVER selects the document's semantically most relevant
+ * chunks (embedding centroid, or vector search on focusQuery) and generates
+ * flashcards from those topics, persisting them with chunk/page provenance.
+ * Requires the document to be indexed (rag-index).
+ */
+export function generateFlashcardsFromDocument(payload: {
+  documentId: string
+  maxCards?: number
+  language?: string
+  /** Optional topic: cards are generated from the chunks most similar to it. */
+  focusQuery?: string
+}): Promise<AiClientResult<{
+  flashcards: PremiumGeneratedFlashcard[]
+  savedIds?: string[]
+  cached: boolean
+  premium?: boolean
+  source?: string
+  chunksUsed?: number
+}>> {
+  return callFunction('generate-flashcards', { ...payload, fromDocument: true })
+}
+
+export function saveReviewedFlashcards(payload: {
+  documentId: string
+  cards: PremiumGeneratedFlashcard[]
+}): Promise<AiClientResult<{
+  savedIds: string[]
+  savedCount: number
+  premium: true
+  source: 'human_reviewed'
+}>> {
+  return callFunction('generate-flashcards', { ...payload, saveReviewed: true })
+}
+
 export function generatePremiumOutline(payload: {
   candidates: PremiumOutlineCandidate[]
   pageCount: number
@@ -149,7 +201,7 @@ export function submitSrsReview(payload: {
   quizSessionId?: string
   recordAnswer?: boolean
   recordProgress?: boolean
-}): Promise<AiClientResult<{ srs: unknown }>> {
+}): Promise<AiClientResult<{ srs: SrsState }>> {
   return callFunction('srs-review', payload)
 }
 
@@ -179,6 +231,29 @@ export function createDocumentUpload(payload: {
   queuedJobs: string[]
 }>> {
   return callFunction('document-upload', payload)
+}
+
+export function finalizeDocumentUpload(payload: {
+  documentId: string
+  pageCount?: number
+  language?: string
+}): Promise<AiClientResult<{
+  documentId: string
+  status: 'verification_queued' | 'submitted'
+  verified: boolean
+  verificationQueued: boolean
+  processingRunId: string
+  queuedJobs: string[]
+  postProcessingStages?: string[]
+}>> {
+  return callFunction('document-upload', { action: 'finalize', ...payload })
+}
+
+export function cancelDocumentUpload(documentId: string): Promise<AiClientResult<{
+  documentId: string
+  status: 'cancelled'
+}>> {
+  return callFunction('document-upload', { action: 'cancel', documentId })
 }
 
 // --------------------------------------------------------------------------

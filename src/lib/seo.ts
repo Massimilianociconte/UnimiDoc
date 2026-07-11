@@ -167,7 +167,7 @@ export function organizationJsonLd(): Record<string, unknown> {
     '@type': 'Organization',
     name: SITE_NAME,
     description: SITE_TAGLINE,
-    url: 'https://unimidoc.it',
+    url: typeof window === 'undefined' ? 'https://unimidoc.netlify.app' : window.location.origin,
   }
 }
 

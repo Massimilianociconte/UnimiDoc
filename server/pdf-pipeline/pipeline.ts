@@ -1,5 +1,6 @@
 import { execFile as execFileCallback } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { mkdtemp, open, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -36,6 +37,23 @@ export type PipelineInput = {
   cacheStore?: FlashcardCacheStore
   hasPremiumEntitlement?: (userId: string) => Promise<boolean>
   recordAiCost?: (entry: AiCostLedgerEntry) => Promise<void>
+  savePrivatePdf: (input: {
+    userId: string
+    documentId: string
+    path: string
+    sha256: string
+  }) => Promise<string>
+  runSelectiveOcr?: (
+    filePath: string,
+    pageNumbers: number[],
+    tier: ProcessingTier,
+  ) => Promise<OcrPage[]>
+}
+
+export type OcrPage = {
+  pageNumber: number
+  text: string
+  textQualityScore: number
 }
 
 export type PdfMetrics = {
@@ -44,6 +62,11 @@ export type PdfMetrics = {
   pageCount: number
   textHash: string
   nativeTextChars: number
+}
+
+export type NativeCommandOptions = {
+  signal?: AbortSignal
+  timeoutMs?: number
 }
 
 export type FlashcardDraft = {
@@ -130,7 +153,7 @@ export async function processUploadedPdf(input: PipelineInput) {
     const compressedPath = path.join(workDir, 'compressed.pdf')
     const compression = await compressLosslessPdf(input.originalPath, compressedPath, before)
 
-    const storedPath = await savePrivatePdf({
+    const storedPath = await input.savePrivatePdf({
       userId: input.userId,
       documentId: input.documentId,
       path: compression.outputPath,
@@ -139,7 +162,9 @@ export async function processUploadedPdf(input: PipelineInput) {
 
     const extracted = await extractNativeText(compression.outputPath)
     const pagesNeedingOcr = selectPagesForOcr(extracted.pages, input.tier)
-    const ocrPages = pagesNeedingOcr.length ? await runSelectiveOcr(compression.outputPath, pagesNeedingOcr, input.tier) : []
+    const ocrPages = pagesNeedingOcr.length
+      ? await runSelectiveOcr(compression.outputPath, pagesNeedingOcr, input.tier, input.runSelectiveOcr)
+      : []
 
     const structuredPages = mergeNativeAndOcr(extracted.pages, ocrPages)
     const chunks = chunkStructuredPdf(structuredPages)
@@ -160,6 +185,8 @@ export async function processUploadedPdf(input: PipelineInput) {
     return {
       storagePath: storedPath,
       compression,
+      pages: structuredPages,
+      ocrPages,
       outline,
       chunks,
       flashcards,
@@ -169,7 +196,7 @@ export async function processUploadedPdf(input: PipelineInput) {
   }
 }
 
-async function validatePdf(filePath: string) {
+export async function validatePdf(filePath: string, options: NativeCommandOptions = {}) {
   const fileHandle = await open(filePath, 'r')
   const header = Buffer.alloc(5)
 
@@ -188,15 +215,19 @@ async function validatePdf(filePath: string) {
     throw new Error('PDF_TOO_LARGE')
   }
 
-  await execFile('qpdf', ['--check', filePath])
+  await execFile('qpdf', ['--check', filePath], {
+    signal: options.signal,
+    timeout: options.timeoutMs ?? 120_000,
+    maxBuffer: 2 * 1024 * 1024,
+  })
 }
 
-async function inspectPdf(filePath: string): Promise<PdfMetrics> {
+export async function inspectPdf(filePath: string, options: NativeCommandOptions = {}): Promise<PdfMetrics> {
   const [bytes, sha256, pageCount, nativeText] = await Promise.all([
     stat(filePath).then((file) => file.size),
     sha256File(filePath),
-    readPageCount(filePath),
-    extractTextWithPdftotext(filePath),
+    readPageCount(filePath, options),
+    extractTextWithPdftotext(filePath, options),
   ])
 
   return {
@@ -208,7 +239,12 @@ async function inspectPdf(filePath: string): Promise<PdfMetrics> {
   }
 }
 
-async function compressLosslessPdf(inputPath: string, outputPath: string, before: PdfMetrics) {
+export async function compressLosslessPdf(
+  inputPath: string,
+  outputPath: string,
+  before: PdfMetrics,
+  options: NativeCommandOptions = {},
+) {
   await execFile('qpdf', [
     '--object-streams=generate',
     '--stream-data=compress',
@@ -217,9 +253,13 @@ async function compressLosslessPdf(inputPath: string, outputPath: string, before
     '--remove-unreferenced-resources=auto',
     inputPath,
     outputPath,
-  ])
+  ], {
+    signal: options.signal,
+    timeout: options.timeoutMs ?? 300_000,
+    maxBuffer: 4 * 1024 * 1024,
+  })
 
-  const after = await inspectPdf(outputPath)
+  const after = await inspectPdf(outputPath, options)
   const verified = verifyLosslessCompression(before, after)
 
   if (!verified || after.bytes >= before.bytes) {
@@ -241,7 +281,7 @@ async function compressLosslessPdf(inputPath: string, outputPath: string, before
   }
 }
 
-function verifyLosslessCompression(before: PdfMetrics, after: PdfMetrics) {
+export function verifyLosslessCompression(before: PdfMetrics, after: PdfMetrics) {
   const samePageCount = before.pageCount === after.pageCount
   const sameText = before.textHash === after.textHash
   const reasonableSize = after.bytes > 0 && after.bytes <= before.bytes
@@ -249,8 +289,8 @@ function verifyLosslessCompression(before: PdfMetrics, after: PdfMetrics) {
   return samePageCount && sameText && reasonableSize
 }
 
-async function extractNativeText(filePath: string) {
-  const text = await extractTextWithPdftotext(filePath)
+export async function extractNativeText(filePath: string, options: NativeCommandOptions = {}) {
+  const text = await extractTextWithPdftotext(filePath, options)
   const pages = text.split('\f').map((content, index) => ({
     pageNumber: index + 1,
     text: cleanExtractedPageText(content),
@@ -260,7 +300,7 @@ async function extractNativeText(filePath: string) {
   return { pages }
 }
 
-function selectPagesForOcr(
+export function selectPagesForOcr(
   pages: Array<{ pageNumber: number; text: string; textQualityScore: number }>,
   tier: ProcessingTier,
 ) {
@@ -272,19 +312,27 @@ function selectPagesForOcr(
     .map((page) => page.pageNumber)
 }
 
-async function runSelectiveOcr(_filePath: string, pageNumbers: number[], tier: ProcessingTier) {
+export async function runSelectiveOcr(
+  filePath: string,
+  pageNumbers: number[],
+  tier: ProcessingTier,
+  adapter?: PipelineInput['runSelectiveOcr'],
+): Promise<OcrPage[]> {
   if (tier === 'free') return []
+  if (!adapter) throw new Error('OCR_ADAPTER_REQUIRED')
 
-  // Production worker: render only selected pages, run OCRmyPDF/Tesseract locally,
-  // then use premium multimodal AI only when figures or formulas remain ambiguous.
-  return pageNumbers.map((pageNumber) => ({
-    pageNumber,
-    text: '',
-    textQualityScore: 0,
-  }))
+  const requested = new Set(pageNumbers)
+  const result = await adapter(filePath, pageNumbers, tier)
+  return result
+    .filter((page) => requested.has(page.pageNumber) && page.text.trim().length > 0)
+    .map((page) => ({
+      pageNumber: page.pageNumber,
+      text: cleanExtractedPageText(page.text),
+      textQualityScore: clamp(page.textQualityScore, 0, 1),
+    }))
 }
 
-function mergeNativeAndOcr(
+export function mergeNativeAndOcr(
   nativePages: Array<{ pageNumber: number; text: string; textQualityScore: number }>,
   ocrPages: Array<{ pageNumber: number; text: string; textQualityScore: number }>,
 ) {
@@ -296,7 +344,7 @@ function mergeNativeAndOcr(
   })
 }
 
-type StructuredChunk = {
+export type StructuredChunk = {
   chunkIndex: number
   pageStart: number
   pageEnd: number
@@ -305,9 +353,9 @@ type StructuredChunk = {
   contentSha256: string
 }
 
-type TextBlock = { kind: 'heading' | 'paragraph' | 'list'; text: string; level?: 1 | 2 | 3 }
+export type TextBlock = { kind: 'heading' | 'paragraph' | 'list'; text: string; level?: 1 | 2 | 3 }
 
-function chunkStructuredPdf(pages: Array<{ pageNumber: number; text: string }>): StructuredChunk[] {
+export function chunkStructuredPdf(pages: Array<{ pageNumber: number; text: string }>): StructuredChunk[] {
   const chunks: StructuredChunk[] = []
   let chunkIndex = 0
   let buffer: string[] = []
@@ -336,7 +384,9 @@ function chunkStructuredPdf(pages: Array<{ pageNumber: number; text: string }>):
 
     for (const block of blocks) {
       if (block.kind === 'heading') {
-        if (buffer.join('\n\n').length >= 700) flush()
+        // A heading starts a new semantic section. Flushing even a short buffer
+        // prevents prose from the previous section inheriting the new path.
+        if (buffer.length > 0) flush()
         sectionPath = updateSectionPath(sectionPath, block.text, block.level ?? 2)
         continue
       }
@@ -357,7 +407,7 @@ function chunkStructuredPdf(pages: Array<{ pageNumber: number; text: string }>):
   return chunks
 }
 
-function splitStructuredBlocks(text: string): TextBlock[] {
+export function splitStructuredBlocks(text: string): TextBlock[] {
   const blocks: TextBlock[] = []
   let paragraph: string[] = []
 
@@ -390,8 +440,9 @@ function splitStructuredBlocks(text: string): TextBlock[] {
   return blocks
 }
 
-function buildStructuredOutline(pages: Array<{ pageNumber: number; text: string }>): StructuredOutlineEntry[] {
-  const candidates: Array<Omit<StructuredOutlineEntry, 'pageEnd' | 'ordinal' | 'parentOrdinal'>> = []
+export function buildStructuredOutline(pages: Array<{ pageNumber: number; text: string }>): StructuredOutlineEntry[] {
+  type OutlineCandidate = Omit<StructuredOutlineEntry, 'pageEnd' | 'ordinal' | 'parentOrdinal'>
+  const candidates: OutlineCandidate[] = []
 
   for (const page of pages) {
     const blocks = splitStructuredBlocks(page.text)
@@ -409,10 +460,10 @@ function buildStructuredOutline(pages: Array<{ pageNumber: number; text: string 
     })
   }
 
-  const selected = candidates.length >= Math.min(4, Math.ceil(pages.length / 4))
+  const selected: OutlineCandidate[] = candidates.length >= Math.min(4, Math.ceil(pages.length / 4))
     ? dedupeOutline(candidates)
     : pages
-      .map((page) => {
+      .map<OutlineCandidate | null>((page) => {
         const firstUseful = splitStructuredBlocks(page.text)
           .find((block) => block.kind !== 'heading' && block.text.length >= 40 && !isLowValueLine(block.text))
         return firstUseful
@@ -425,7 +476,7 @@ function buildStructuredOutline(pages: Array<{ pageNumber: number; text: string 
             }
           : null
       })
-      .filter((entry): entry is Omit<StructuredOutlineEntry, 'pageEnd' | 'ordinal' | 'parentOrdinal'> => Boolean(entry))
+      .filter((entry): entry is OutlineCandidate => entry !== null)
 
   const stack: Array<{ level: 1 | 2 | 3; ordinal: number }> = []
   return selected.slice(0, 220).map((entry, index) => {
@@ -827,7 +878,7 @@ function stripHeadingNumber(line: string) {
   return normalizeText(line).replace(/^\d+(?:\.\d+)*\s+/, '').replace(/[.:;,\s]+$/, '')
 }
 
-function scoreNativeText(text: string) {
+export function scoreNativeText(text: string) {
   const normalized = normalizeText(text)
   if (!normalized) return 0
 
@@ -838,35 +889,43 @@ function scoreNativeText(text: string) {
   return clamp(alphaRatio * 0.7 + Math.min(averageLineLength / 70, 1) * 0.3 - replacementRatio, 0, 1)
 }
 
-async function savePrivatePdf(_input: { userId: string; documentId: string; path: string; sha256: string }) {
-  // Production implementation: upload to Supabase Storage with service role.
-  // Path format: `${userId}/documents/${documentId}/document.pdf`.
-  return 'private-documents/user-id/documents/document-id/document.pdf'
-}
-
-async function readPageCount(filePath: string) {
-  const { stdout } = await execFile('pdfinfo', [filePath])
+export async function readPageCount(filePath: string, options: NativeCommandOptions = {}) {
+  const { stdout } = await execFile('pdfinfo', [filePath], {
+    signal: options.signal,
+    timeout: options.timeoutMs ?? 60_000,
+    maxBuffer: 1024 * 1024,
+  })
   const match = stdout.match(/^Pages:\s+(\d+)/m)
   if (!match) throw new Error('PDFINFO_PAGE_COUNT_FAILED')
   return Number(match[1])
 }
 
-async function extractTextWithPdftotext(filePath: string) {
-  const { stdout } = await execFile('pdftotext', ['-layout', '-enc', 'UTF-8', filePath, '-'], {
-    maxBuffer: 32 * 1024 * 1024,
-  })
-  return stdout
+export async function extractTextWithPdftotext(filePath: string, options: NativeCommandOptions = {}) {
+  const outputDir = await mkdtemp(path.join(tmpdir(), 'unimidoc-pdftotext-'))
+  const outputPath = path.join(outputDir, 'pages.txt')
+  try {
+    await execFile('pdftotext', ['-layout', '-enc', 'UTF-8', filePath, outputPath], {
+      signal: options.signal,
+      timeout: options.timeoutMs ?? 180_000,
+      maxBuffer: 2 * 1024 * 1024,
+    })
+    return await readFile(outputPath, 'utf8')
+  } finally {
+    await rm(outputDir, { force: true, recursive: true })
+  }
 }
 
 async function sha256File(filePath: string) {
-  return sha256String(await readFile(filePath))
+  const hash = createHash('sha256')
+  for await (const chunk of createReadStream(filePath)) hash.update(chunk as Buffer)
+  return hash.digest('hex')
 }
 
 function sha256String(value: string | Buffer) {
   return createHash('sha256').update(value).digest('hex')
 }
 
-function normalizeText(text: string) {
+export function normalizeText(text: string) {
   return text.replace(/\s+/g, ' ').trim()
 }
 

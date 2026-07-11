@@ -14,6 +14,8 @@ export type AiHelpContext = {
   previousExplanation?: string | null
   followupQuestion?: string | null
   language?: string
+  /** Passaggi del documento recuperati via ricerca vettoriale (RAG), già formattati. */
+  ragContext?: string | null
 }
 
 const SYSTEM: Record<AiHelpMode, string> = {
@@ -50,6 +52,10 @@ const SYSTEM: Record<AiHelpMode, string> = {
 export function buildAiHelpPrompt(mode: AiHelpMode, ctx: AiHelpContext): ChatMessage[] {
   const language = ctx.language ?? 'it'
   const source = (ctx.sourceText ?? '').slice(0, 6000)
+  // Passaggi recuperati dal documento via embedding (RAG): fonte primaria di
+  // grounding quando presente — il tutor deve preferirla al proprio "sapere".
+  const rag = (ctx.ragContext ?? '').slice(0, 6000)
+  const ragBlock = rag ? `Passaggi rilevanti dal documento (recuperati per pertinenza):\n${rag}` : null
 
   if (mode === 'followup') {
     const user = [
@@ -58,11 +64,12 @@ export function buildAiHelpPrompt(mode: AiHelpMode, ctx: AiHelpContext): ChatMes
       `Risposta data dall’utente: ${ctx.userAnswer ?? '-'}`,
       `Spiegazione precedente: ${ctx.previousExplanation ?? '-'}`,
       `Testo sorgente: ${source || '-'}`,
+      ...(ragBlock ? ['', ragBlock] : []),
       '',
       `Domanda follow-up dell’utente: ${ctx.followupQuestion ?? ''}`,
       `Lingua: ${language}`,
       '',
-      'Rispondi in modo breve e didattico.',
+      'Rispondi in modo breve e didattico. Se i passaggi del documento coprono la domanda, basati su quelli.',
     ].join('\n')
     return [{ role: 'system', content: SYSTEM.followup }, { role: 'user', content: user }]
   }
@@ -73,6 +80,7 @@ export function buildAiHelpPrompt(mode: AiHelpMode, ctx: AiHelpContext): ChatMes
     `Risposta utente: ${ctx.userAnswer ?? '-'}`,
     `Stato risposta: ${ctx.answerStatus ?? '-'}`,
     `Testo sorgente: ${source || '-'}`,
+    ...(ragBlock ? [ragBlock] : []),
     `Lingua: ${language}`,
   ].join('\n')
   return [{ role: 'system', content: SYSTEM[mode] }, { role: 'user', content: user }]

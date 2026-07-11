@@ -30,6 +30,7 @@ const geminiEnv = (globalThis as any).Deno?.env
 const EMBEDDING_MODEL = geminiEnv?.get('GEMINI_EMBEDDING_MODEL') ?? 'gemini-embedding-001'
 const EMBEDDING_DIMENSIONS = Number(geminiEnv?.get('RAG_EMBEDDING_DIMENSIONS') ?? '768')
 const EMBEDDING_VERSION = geminiEnv?.get('RAG_EMBEDDING_VERSION') ?? '1'
+const DATABASE_VECTOR_DIMENSIONS = 768
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 
 function taskType(kind: EmbeddingKind): string {
@@ -76,7 +77,17 @@ class GeminiEmbeddingProvider implements EmbeddingProvider {
         throw errors.upstream('Generazione embedding non riuscita.')
       }
       const data = (await res.json()) as { embeddings?: Array<{ values: number[] }> }
-      for (const item of data.embeddings ?? []) out.push(item.values)
+      for (const item of data.embeddings ?? []) {
+        const values = item.values
+        if (
+          !Array.isArray(values)
+          || values.length !== EMBEDDING_DIMENSIONS
+          || values.some((value) => !Number.isFinite(value))
+        ) {
+          throw errors.upstream('Il provider ha restituito un embedding non valido.')
+        }
+        out.push(values)
+      }
     }
 
     if (out.length !== texts.length) throw errors.upstream('Risposta embedding incompleta.')
@@ -88,6 +99,14 @@ let singleton: EmbeddingProvider | null = null
 
 /** Returns the configured embedding provider. Swap here to change vendor. */
 export function getEmbeddingProvider(): EmbeddingProvider {
+  if (!Number.isInteger(EMBEDDING_DIMENSIONS) || EMBEDDING_DIMENSIONS !== DATABASE_VECTOR_DIMENSIONS) {
+    throw errors.upstream(
+      `RAG_EMBEDDING_DIMENSIONS deve essere ${DATABASE_VECTOR_DIMENSIONS}; una dimensione diversa richiede una migrazione e reindicizzazione.`,
+    )
+  }
+  if (!EMBEDDING_MODEL.trim() || !EMBEDDING_VERSION.trim()) {
+    throw errors.upstream('Modello o versione embedding non configurati.')
+  }
   if (!singleton) singleton = new GeminiEmbeddingProvider()
   return singleton
 }

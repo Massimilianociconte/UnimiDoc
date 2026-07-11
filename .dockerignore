@@ -1,0 +1,17 @@
+.git
+.github
+.netlify
+.env
+.env.*
+!.env.example
+dist
+node_modules
+npm-debug.log*
+playwright-report
+test-results
+supabase/.branches
+supabase/.temp
+supabase/.env
+src
+public
+docs

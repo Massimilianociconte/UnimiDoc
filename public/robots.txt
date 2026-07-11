@@ -28,4 +28,4 @@ Allow: /
 User-agent: ClaudeBot
 Allow: /
 
-Sitemap: https://unimidoc.it/sitemap.xml
+Sitemap: https://unimidoc.netlify.app/sitemap.xml

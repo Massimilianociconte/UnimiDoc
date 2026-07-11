@@ -59,19 +59,20 @@ diviso questo prezzo".
 
 ## 4. Tipi di credito e convertibilità
 
-`CreditOrigin = 'welcome' | 'earned' | 'purchased'`.
+`CreditOrigin = 'welcome' | 'promotional' | 'earned' | 'purchased'`.
 
 | Tipo | Come si ottiene | Spendibile | Convertibile in € |
 |------|-----------------|-----------|-------------------|
 | `welcome` | 30 crediti al signup (€3 di valore di spesa) | Sì | **No** |
-| `earned` | payout da vendite proprie | Sì | **Sì** (≥ `MIN_PAYOUT_EUR`) |
+| `promotional` | bonus associato a una ricarica | Sì | **No** |
+| `earned` | payout da vendite proprie o ricompense | Sì | Solo quota `earned_convertible` (≥ `MIN_PAYOUT_EUR`) |
 | `purchased` | pacchetti ricarica | Sì | No |
 
-Regola chiave di sostenibilità: **welcome e purchased NON sono prelevabili in
-denaro** (solo spendibili sulla piattaforma), così il bonus di benvenuto non è
-un costo cash. Solo i crediti `earned` (che rappresentano una vendita realmente
-avvenuta, già al netto della commissione) sono convertibili in payout, sopra la
-soglia `MIN_PAYOUT_EUR = €25`.
+Regola chiave di sostenibilità: `welcome`, `promotional` e `purchased` non sono
+prelevabili. `promotional` resta inoltre separato da `purchased`, perché non è
+cash-backed e non può generare un incasso reale al venditore. Dei crediti
+`earned`, soltanto la quota `earned_convertible` finanziata da valore cash è
+prelevabile, sopra la soglia `MIN_PAYOUT_EUR = €25`.
 
 `WELCOME_CREDITS = 30` = ~1 dispensa base/standard, mai un documento premium
 (che prezza ben oltre 30): il free trial fa provare la piattaforma senza
@@ -81,12 +82,12 @@ regalare contenuto di valore.
 
 Più spendi, più bonus (valore effettivo per € che migliora col taglio):
 
-| Pack | Prezzo | Crediti | cr/€ | Valore di spesa |
-|------|--------|---------|------|-----------------|
-| starter | €5 | 50 | 10,0 | €5,00 |
-| standard | €10 | 105 | 10,5 | €10,50 |
-| plus | €20 | 220 | 11,0 | €22,00 |
-| max | €40 | 460 | 11,5 | €46,00 |
+| Pack | Prezzo | Pagati | Promozionali | Totale | cr/€ | Valore di spesa |
+|------|--------|--------|---------------|--------|------|-----------------|
+| starter | €5 | 50 | 0 | 50 | 10,0 | €5,00 |
+| standard | €10 | 100 | 5 | 105 | 10,5 | €10,50 |
+| plus | €20 | 200 | 20 | 220 | 11,0 | €22,00 |
+| max | €40 | 400 | 60 | 460 | 11,5 | €46,00 |
 
 Acquisto minimo `MIN_TOPUP_EUR = €5`. Il bonus è "valore di spesa" (crediti in
 più), non cash: incentiva ricariche maggiori senza erodere il margine reale.
@@ -101,8 +102,9 @@ più), non cash: incentiva ricariche maggiori senza erodere il margine reale.
 
 Il wallet (`src/lib/creditsWallet.ts` in demo; colonne DB in
 `202607040009_credit_origin_split.sql` in live) tiene il saldo **diviso per
-origine**: `free`, `purchased`, `earned` (con `earned_convertible` = quota
-prelevabile). `balance = free + purchased + earned`.
+origine**: `free`, `promotional`, `purchased`, `earned` (con
+`earned_convertible` = quota prelevabile).
+`balance = free + promotional + purchased + earned`.
 
 **Regola crediti gratuiti (sostenibilità del bonus):** i 30 crediti `free`
 sbloccano SOLO documenti a basso costo (≤ 30 crediti = `FREE_CREDIT_MAX_DOC_PRICE`).
@@ -110,8 +112,8 @@ Su documenti più cari i crediti gratuiti non sono spendibili: servono
 purchased/earned. Così il bonus fa provare la piattaforma senza regalare
 contenuto premium.
 
-**Ordine di consumo:** `free → purchased → earned`. I gratuiti si bruciano per
-primi (promo da usare); i crediti pagati/guadagnati si conservano.
+**Ordine di consumo:** `free → promotional → purchased → earned non-convertible
+→ earned convertible`. I bucket non cash-backed vengono consumati per primi.
 
 **Coerenza payout venditore per tipo di credito:** la quota che l'acquirente
 paga con crediti `free` NON è coperta da denaro reale → il venditore riceve per

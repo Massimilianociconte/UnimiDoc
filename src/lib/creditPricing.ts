@@ -61,18 +61,28 @@ export const MIN_PAYOUT_EUR = 25
 /** Acquisto minimo di crediti (€) per una ricarica. */
 export const MIN_TOPUP_EUR = 5
 
-export type CreditOrigin = 'welcome' | 'earned' | 'purchased'
+export type CreditOrigin = 'welcome' | 'promotional' | 'earned' | 'purchased'
+
+export type TopupPack = {
+  id: string
+  priceEur: number
+  paidCredits: number
+  promotionalCredits: number
+  totalCredits: number
+  bonusPct: number
+}
 
 /**
  * Pacchetti ricarica: più spendi più bonus ricevi (il valore effettivo per €
  * migliora con il taglio, incentivando acquisti maggiori senza svendere).
- * `credits` = crediti totali accreditati; `priceEur` = prezzo pagato.
+ * Paid and promotional credits are explicit so bonus units can never be
+ * mistaken for cash-backed value.
  */
-export const TOPUP_PACKS: Array<{ id: string; priceEur: number; credits: number; bonusPct: number }> = [
-  { id: 'starter', priceEur: 5, credits: 50, bonusPct: 0 },
-  { id: 'standard', priceEur: 10, credits: 105, bonusPct: 5 },
-  { id: 'plus', priceEur: 20, credits: 220, bonusPct: 10 },
-  { id: 'max', priceEur: 40, credits: 460, bonusPct: 15 },
+export const TOPUP_PACKS: TopupPack[] = [
+  { id: 'starter', priceEur: 5, paidCredits: 50, promotionalCredits: 0, totalCredits: 50, bonusPct: 0 },
+  { id: 'standard', priceEur: 10, paidCredits: 100, promotionalCredits: 5, totalCredits: 105, bonusPct: 5 },
+  { id: 'plus', priceEur: 20, paidCredits: 200, promotionalCredits: 20, totalCredits: 220, bonusPct: 10 },
+  { id: 'max', priceEur: 40, paidCredits: 400, promotionalCredits: 60, totalCredits: 460, bonusPct: 15 },
 ]
 
 /** Crediti → euro (valore nominale di spesa). */
@@ -139,6 +149,8 @@ function clamp(value: number, min: number, max: number): number {
 
 type PricingInput = Pick<DocumentItem, 'pages' | 'quality' | 'downloads' | 'premium' | 'verified' | 'uploaderTrust' | 'subject'>
 
+type StoredPricingInput = PricingInput & Partial<Pick<DocumentItem, 'credits'>>
+
 /** Intrinsic (pre-clamp) fair value of a document in credits. */
 function intrinsicFairValue(doc: PricingInput): number {
   const pages = Number.isFinite(doc.pages) ? Math.max(0, doc.pages) : 0
@@ -169,6 +181,18 @@ export function documentCreditPrice(doc: PricingInput, sellerAsk?: number): numb
       : fair
 
   return Math.round(clamp(priced, MIN_DOCUMENT_PRICE, MAX_DOCUMENT_PRICE))
+}
+
+/**
+ * Price shown and charged for an existing catalog item. Once a document has a
+ * stored price, that value is authoritative: recomputing it from mutable
+ * popularity/quality signals would make the UI disagree with the purchase RPC.
+ */
+export function effectiveDocumentPrice(doc: StoredPricingInput): number {
+  if (typeof doc.credits === 'number' && Number.isFinite(doc.credits) && doc.credits >= 0) {
+    return Math.round(clamp(doc.credits, 0, MAX_DOCUMENT_PRICE))
+  }
+  return documentCreditPrice(doc)
 }
 
 /**

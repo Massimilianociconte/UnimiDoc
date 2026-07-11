@@ -6,17 +6,19 @@ import type { DocumentItem } from '../data'
 // ----------------------------------------------------------------------------
 // Source of truth for the DEMO experience (localStorage, per user id, survives
 // login/logout/refresh). The live path mirrors this in Postgres:
-// `user_credit_accounts` gains free_credits / purchased_credits columns and the
+// `user_credit_accounts` stores one balance bucket per economic origin and the
 // SECURITY DEFINER `purchase_document` RPC applies the same rules server-side.
 //
 // Credit origins:
 //   • free      — 30 welcome credits, non-refundable, LIMITED to low-cost docs.
+//   • promotional — top-up bonus, spendable but not cash-backed.
 //   • purchased — bought with real money (top-up packs). Fully spendable.
 //   • earned    — seller payouts. Spendable; the convertible-to-cash part is
 //                 tracked separately (see below).
 //
-// Consumption order when spending: free → purchased → earned. Free credits are
-// burned first so the promotional bonus gets used and paid credits are retained.
+// Consumption order: free → promotional → purchased → earned
+// non-convertible → earned convertible. Non-cash buckets are burned first so
+// cash-backed value is retained for as long as possible.
 //
 // Economic-balance rule (the important one): free credits are NOT backed by real
 // money, so a sale funded by free credits must NOT pay the seller real cash. The
@@ -25,10 +27,11 @@ import type { DocumentItem } from '../data'
 // convertible (withdrawable) payout. This keeps the welcome bonus sustainable.
 // ============================================================================
 
-export type CreditOrigin = 'free' | 'purchased' | 'earned'
+export type CreditOrigin = 'free' | 'promotional' | 'purchased' | 'earned'
 
 export type Wallet = {
   free: number
+  promotional: number
   purchased: number
   earned: number
   /** Portion of `earned` that is convertible to cash (funded by real money). */
@@ -49,7 +52,13 @@ export type LedgerEntry = {
   documentTitle?: string
   eurValue: number
   /** For a spend: how much came from each origin. */
-  breakdown?: { free: number; purchased: number; earned: number }
+  breakdown?: {
+    free: number
+    promotional: number
+    purchased: number
+    earnedNonConvertible: number
+    earnedConvertible: number
+  }
 }
 
 export type PurchasedItem = {
@@ -90,7 +99,7 @@ function storageKey(userId: string): string {
 
 function emptyState(): WalletState {
   return {
-    wallet: { free: 0, purchased: 0, earned: 0, earnedConvertible: 0 },
+    wallet: { free: 0, promotional: 0, purchased: 0, earned: 0, earnedConvertible: 0 },
     ledger: [],
     purchases: [],
     initialized: false,
@@ -98,7 +107,7 @@ function emptyState(): WalletState {
 }
 
 export function balanceOf(wallet: Wallet): number {
-  return wallet.free + wallet.purchased + wallet.earned
+  return wallet.free + wallet.promotional + wallet.purchased + wallet.earned
 }
 
 export function loadWalletState(userId: string): WalletState {
@@ -111,6 +120,7 @@ export function loadWalletState(userId: string): WalletState {
     return {
       wallet: {
         free: parsed.wallet?.free ?? 0,
+        promotional: parsed.wallet?.promotional ?? 0,
         purchased: parsed.wallet?.purchased ?? 0,
         earned: parsed.wallet?.earned ?? 0,
         earnedConvertible: parsed.wallet?.earnedConvertible ?? 0,
@@ -174,7 +184,7 @@ export function isFreeEligible(priceCredits: number): boolean {
 
 /**
  * Spend credits to unlock a document. Applies the free-credit eligibility rule,
- * the free→purchased→earned consumption order, records a ledger entry and a
+ * the free→promotional→purchased→earned consumption order, records a ledger entry and a
  * library purchase item, and persists everything. Pure w.r.t. inputs; the only
  * side effect is localStorage.
  */
@@ -185,14 +195,14 @@ export function purchaseWithWallet(userId: string, document: DocumentItem, price
     return { ok: false, reason: 'already_owned' }
   }
 
-  const { free, purchased, earned } = state.wallet
+  const { free, promotional, purchased, earned, earnedConvertible } = state.wallet
   const freeEligible = isFreeEligible(priceCredits)
   const spendableFree = freeEligible ? free : 0
-  const available = spendableFree + purchased + earned
+  const available = spendableFree + promotional + purchased + earned
 
   if (available < priceCredits) {
     // Distinguish "you have free credits but this doc is too expensive for them".
-    if (!freeEligible && free + purchased + earned >= priceCredits) {
+    if (!freeEligible && free + promotional + purchased + earned >= priceCredits) {
       return { ok: false, reason: 'free_only_low_cost' }
     }
     return { ok: false, reason: 'insufficient' }
@@ -200,20 +210,31 @@ export function purchaseWithWallet(userId: string, document: DocumentItem, price
 
   const balanceBefore = balanceOf(state.wallet)
 
-  // Deduct free → purchased → earned.
+  // Deduct non-cash value before cash-backed value, mirroring purchase_document.
   let remaining = priceCredits
   const useFree = Math.min(spendableFree, remaining)
   remaining -= useFree
+  const usePromotional = Math.min(promotional, remaining)
+  remaining -= usePromotional
   const usePurchased = Math.min(purchased, remaining)
   remaining -= usePurchased
-  const useEarned = Math.min(earned, remaining)
-  remaining -= useEarned
+  const earnedNonConvertible = Math.max(0, earned - earnedConvertible)
+  const useEarnedNonConvertible = Math.min(earnedNonConvertible, remaining)
+  remaining -= useEarnedNonConvertible
+  const useEarnedConvertible = Math.min(earnedConvertible, remaining)
+  remaining -= useEarnedConvertible
+
+  if (remaining !== 0) {
+    return { ok: false, reason: 'insufficient' }
+  }
 
   const nextWallet: Wallet = {
     ...state.wallet,
     free: free - useFree,
+    promotional: promotional - usePromotional,
     purchased: purchased - usePurchased,
-    earned: earned - useEarned,
+    earned: earned - useEarnedNonConvertible - useEarnedConvertible,
+    earnedConvertible: earnedConvertible - useEarnedConvertible,
   }
   const balanceAfter = balanceOf(nextWallet)
   const transactionId = makeId()
@@ -230,7 +251,13 @@ export function purchaseWithWallet(userId: string, document: DocumentItem, price
     documentId: document.id,
     documentTitle: document.title,
     eurValue,
-    breakdown: { free: useFree, purchased: usePurchased, earned: useEarned },
+    breakdown: {
+      free: useFree,
+      promotional: usePromotional,
+      purchased: usePurchased,
+      earnedNonConvertible: useEarnedNonConvertible,
+      earnedConvertible: useEarnedConvertible,
+    },
   }
 
   const item: PurchasedItem = {
@@ -262,19 +289,31 @@ export function purchaseWithWallet(userId: string, document: DocumentItem, price
   return { ok: true, state: nextState, entry, item }
 }
 
-/** Credit a top-up purchase (real money) into the purchased bucket. */
-export function addPurchasedCredits(userId: string, credits: number, priceEur: number): WalletState {
+/** Credit a top-up while keeping paid and promotional units economically separate. */
+export function addPurchasedCredits(
+  userId: string,
+  paidCredits: number,
+  priceEur: number,
+  promotionalCredits = 0,
+): WalletState {
   const state = loadWalletState(userId)
   const balanceBefore = balanceOf(state.wallet)
-  const nextWallet: Wallet = { ...state.wallet, purchased: state.wallet.purchased + credits }
+  const nextWallet: Wallet = {
+    ...state.wallet,
+    promotional: state.wallet.promotional + promotionalCredits,
+    purchased: state.wallet.purchased + paidCredits,
+  }
+  const totalCredits = paidCredits + promotionalCredits
   const entry: LedgerEntry = {
     id: makeId(),
     ts: nowMs(),
     direction: 'purchased',
-    amount: credits,
+    amount: totalCredits,
     balanceBefore,
     balanceAfter: balanceOf(nextWallet),
-    reason: `Ricarica crediti (€${priceEur.toFixed(2)})`,
+    reason: promotionalCredits > 0
+      ? `Ricarica crediti (€${priceEur.toFixed(2)}) · ${promotionalCredits} promozionali`
+      : `Ricarica crediti (€${priceEur.toFixed(2)})`,
     eurValue: priceEur,
   }
   const nextState: WalletState = { ...state, wallet: nextWallet, ledger: [entry, ...state.ledger] }
@@ -303,13 +342,13 @@ export function addEarnedCredits(userId: string, credits: number, reason: string
 }
 
 /**
- * Seller payout split for a spend breakdown: the free-funded part becomes a
- * non-convertible earned payout, the paid part a convertible one. Used by the
+ * Seller payout split for a spend breakdown: only purchased credits and
+ * already-convertible earnings are cash-backed. Used by the
  * live purchase RPC; kept here so the rule lives in one place.
  */
-export function sellerPayoutFor(breakdown: { free: number; purchased: number; earned: number }) {
-  const paidCredits = breakdown.purchased + breakdown.earned
-  const freeCredits = breakdown.free
+export function sellerPayoutFor(breakdown: NonNullable<LedgerEntry['breakdown']>) {
+  const paidCredits = breakdown.purchased + breakdown.earnedConvertible
+  const freeCredits = breakdown.free + breakdown.promotional + breakdown.earnedNonConvertible
   const convertibleCredits = Math.floor(paidCredits * (1 - PLATFORM_COMMISSION))
   const nonConvertibleCredits = Math.floor(freeCredits * (1 - PLATFORM_COMMISSION))
   return {

@@ -28,7 +28,8 @@ alter table public.documents
   add column if not exists rag_indexed_at timestamptz;
 
 -- --------------------------------------------------------------------------
--- Embeddings companion table. 768 dims = Gemini text-embedding-004 (see
+-- Embeddings companion table. 768 dims = the configured output size for the
+-- versioned Gemini `gemini-embedding-001` provider (see
 -- supabase/functions/_shared/embeddings.ts). Change BOTH the column dimension
 -- and embedding_model/embedding_version together if the model ever changes.
 -- --------------------------------------------------------------------------

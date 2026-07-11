@@ -4,9 +4,11 @@
 // build can swap in a ZVec provider without touching this component.
 
 import { useCallback, useEffect, useState } from 'react'
-import { BrainCircuit, Loader2, Send, Sparkles } from 'lucide-react'
+import { BrainCircuit, Loader2, Send, Sparkles, Layers } from 'lucide-react'
 import { getRagProvider, indexDocument, getIndexStatuses } from '../../lib/rag/provider'
 import type { RagAnswer, RagIndexStatus } from '../../lib/rag/types'
+import { generateFlashcardsFromDocument } from '../../lib/aiClient'
+import { RichMarkdown } from './RichMarkdown'
 
 type Props = {
   documentId: string
@@ -25,6 +27,8 @@ export function AskDocumentPanel({ documentId, documentTitle, onOpenPage }: Prop
   const [asking, setAsking] = useState(false)
   const [answer, setAnswer] = useState<RagAnswer | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [buildingCards, setBuildingCards] = useState(false)
+  const [cardsNotice, setCardsNotice] = useState<string | null>(null)
   const isRealDocumentId = UUID_RE.test(documentId)
 
   const refreshStatus = useCallback(async () => {
@@ -82,6 +86,46 @@ export function AskDocumentPanel({ documentId, documentTitle, onOpenPage }: Prop
       )
   }
 
+  const buildFlashcards = async () => {
+    if (!isRealDocumentId) {
+      setError('Le flashcard persistenti sono disponibili solo per documenti salvati nel tuo account.')
+      return
+    }
+    setBuildingCards(true)
+    setCardsNotice(null)
+    setError(null)
+    const focus = question.trim()
+    const res = await generateFlashcardsFromDocument({
+      documentId,
+      maxCards: 20,
+      language: 'it',
+      ...(focus ? { focusQuery: focus } : {}),
+    })
+    setBuildingCards(false)
+    if (res.ok) {
+      const count = res.data.flashcards.length
+      const savedCount = res.data.savedIds?.length ?? 0
+      setCardsNotice(
+        count > 0 && savedCount === count
+          ? `${count} flashcard generate dagli argomenti più rilevanti${focus ? ` su “${focus}”` : ''} e salvate nella tua libreria.`
+          : count === 0
+            ? 'Nessuna flashcard generata: il documento potrebbe avere poco testo indicizzato.'
+            : null,
+      )
+      if (count > 0 && savedCount !== count) {
+        setError(`Deck incompleto: ${savedCount}/${count} flashcard confermate dal server. Riprova senza rigenerare.`)
+      }
+    } else {
+      setError(
+        res.code === 'login_required'
+          ? 'Accedi per generare flashcard dal documento.'
+          : res.code === 'premium_required'
+            ? 'La generazione di flashcard dai contenuti è una funzione Premium.'
+            : res.message,
+      )
+    }
+  }
+
   const isIndexed = status?.status === 'indexed' || status?.status === 'partial'
   const isBusy = indexing || status?.status === 'processing' || status?.status === 'queued'
 
@@ -131,6 +175,17 @@ export function AskDocumentPanel({ documentId, documentTitle, onOpenPage }: Prop
               {asking ? <Loader2 size={15} className="spin" /> : <Send size={15} />} Chiedi
             </button>
           </div>
+          <div className="rag-secondary-row">
+            <button type="button" className="rag-ghost-action" onClick={buildFlashcards} disabled={buildingCards}>
+              {buildingCards ? <Loader2 size={14} className="spin" /> : <Layers size={14} />}
+              {buildingCards
+                ? 'Genero flashcard…'
+                : question.trim()
+                  ? 'Flashcard su questo argomento'
+                  : 'Flashcard dagli argomenti chiave'}
+            </button>
+          </div>
+          {cardsNotice ? <p className="rag-muted">{cardsNotice}</p> : null}
           {status?.status === 'partial' ? (
             <p className="rag-muted">Indicizzazione parziale ({status.chunkCount} chunk): alcune parti del documento potrebbero non essere coperte.</p>
           ) : null}
@@ -141,7 +196,7 @@ export function AskDocumentPanel({ documentId, documentTitle, onOpenPage }: Prop
 
       {answer ? (
         <div className="rag-answer">
-          <div className="rag-answer-text">{answer.answer}</div>
+          <RichMarkdown text={answer.answer} className="rag-answer-text" />
           {answer.sources.length > 0 ? (
             <div className="rag-sources">
               <span>Fonti</span>

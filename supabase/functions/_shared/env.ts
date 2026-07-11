@@ -81,6 +81,9 @@ export const config = {
     outlineRefinementsPerMonth: num('PREMIUM_MAX_OUTLINE_REFINEMENTS_PER_MONTH', 120),
     maxOutlineCandidates: num('AI_MAX_OUTLINE_CANDIDATES', 220),
     outlineMaxTokens: num('AI_OUTLINE_MAX_TOKENS', 2200),
+    ragQueriesFreePerMonth: num('RAG_MAX_QUERIES_FREE_PER_MONTH', 30),
+    ragQueriesPremiumPerMonth: num('RAG_MAX_QUERIES_PREMIUM_PER_MONTH', 1000),
+    ragIndexesPerMonth: num('RAG_MAX_INDEX_RUNS_PER_MONTH', 60),
   },
 }
 
@@ -93,3 +96,5 @@ export type AiFeature =
   | 'flashcards'
   | 'image_occlusion'
   | 'outline'
+  | 'rag_query'
+  | 'rag_index'

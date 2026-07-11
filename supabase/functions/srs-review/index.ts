@@ -36,12 +36,13 @@ function clampInt(value: unknown, max: number, fallback: number | null): number 
     if (!STATUSES.includes(answerStatus)) throw errors.badRequest('answerStatus non valido.')
 
     // Load current SRS state (RLS restricts to this user).
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('srs_state')
       .select('due_at, last_reviewed_at, review_count, lapse_count, ease_factor, interval_minutes, last_rating, stage')
       .eq('owner_id', userId)
       .eq('flashcard_id', flashcardId)
       .maybeSingle()
+    if (existingError) throw errors.badRequest(`Stato SRS non disponibile: ${existingError.message}`)
 
     const currentState: SrsState | null = existing
       ? {
@@ -58,51 +59,33 @@ function clampInt(value: unknown, max: number, fallback: number | null): number 
 
     const next = calculateNextReview({ currentState, rating, answerStatus })
 
-    const { error: upsertError } = await supabase.from('srs_state').upsert(
-      {
-        owner_id: userId,
-        flashcard_id: flashcardId,
-        due_at: next.dueAt,
-        last_reviewed_at: next.lastReviewedAt,
-        review_count: next.reviewCount,
-        lapse_count: next.lapseCount,
-        ease_factor: next.easeFactor,
-        interval_minutes: next.intervalMinutes,
-        last_rating: next.lastRating,
-        stage: next.stage,
-      },
-      { onConflict: 'owner_id,flashcard_id' },
-    )
-    if (upsertError) {
-      console.error('srs_state upsert failed:', upsertError.message)
-      throw errors.badRequest('Impossibile salvare la revisione. Riprova.')
-    }
-
-    // Answer telemetry (best-effort — non-fatal).
-    if (body.recordAnswer !== false) {
-      await supabase.from('user_answers').insert({
-        owner_id: userId,
-        quiz_session_id: body.quizSessionId ?? null,
-        flashcard_id: flashcardId,
-        question_type: String(body.questionType ?? 'qa'),
-        user_answer: body.userAnswer ? String(body.userAnswer).slice(0, 2000) : null,
-        correct_answer: body.correctAnswer ? String(body.correctAnswer).slice(0, 2000) : null,
-        answer_status: answerStatus,
-        time_spent_ms: clampInt(body.timeSpentMs, 3_600_000, null),
-        attempt_number: clampInt(body.attemptNumber, 1000, 1) ?? 1,
-      })
-    }
-
-    // Dashboard mastery rollup (best-effort). Newer clients can record the
-    // answer immediately and let this endpoint update only SRS scheduling.
-    if (body.recordProgress !== false) {
-      const { error: progressError } = await supabase.rpc('record_flashcard_study_event', {
-        p_flashcard_id: flashcardId,
-        p_answer_status: answerStatus,
-        p_next_due_at: next.dueAt,
-        p_last_reviewed_at: next.lastReviewedAt,
-      })
-      if (progressError) console.error('flashcard progress rollup failed:', progressError.message)
+    // SRS state, answer telemetry and dashboard progress commit in one DB
+    // transaction. expected_review_count plus the DB advisory lock prevents two
+    // concurrent ratings from silently overwriting one another.
+    const { error: reviewError } = await supabase.rpc('record_srs_review_atomic', {
+      p_flashcard_id: flashcardId,
+      p_expected_review_count: currentState?.reviewCount ?? 0,
+      p_answer_status: answerStatus,
+      p_due_at: next.dueAt,
+      p_last_reviewed_at: next.lastReviewedAt,
+      p_review_count: next.reviewCount,
+      p_lapse_count: next.lapseCount,
+      p_ease_factor: next.easeFactor,
+      p_interval_minutes: next.intervalMinutes,
+      p_last_rating: next.lastRating,
+      p_stage: next.stage,
+      p_record_progress: body.recordProgress !== false,
+      p_record_answer: body.recordAnswer !== false,
+      p_quiz_session_id: body.quizSessionId ?? null,
+      p_question_type: String(body.questionType ?? 'qa'),
+      p_user_answer: body.userAnswer ? String(body.userAnswer).slice(0, 2000) : null,
+      p_correct_answer: body.correctAnswer ? String(body.correctAnswer).slice(0, 2000) : null,
+      p_time_spent_ms: clampInt(body.timeSpentMs, 3_600_000, null),
+      p_attempt_number: clampInt(body.attemptNumber, 1000, 1) ?? 1,
+    })
+    if (reviewError) {
+      if (reviewError.code === '40001') throw errors.badRequest('La flashcard è stata aggiornata su un altro dispositivo. Riprova.')
+      throw errors.badRequest(`Impossibile salvare la revisione: ${reviewError.message}`)
     }
 
     return jsonResponse({ srs: next }, 200, req)

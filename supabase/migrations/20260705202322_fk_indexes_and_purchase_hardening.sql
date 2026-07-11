@@ -39,8 +39,9 @@ declare
   v_buyer uuid := auth.uid();
   v_doc public.documents;
   v_price integer;
-  v_free integer; v_purchased integer; v_earned integer;
+  v_free integer; v_purchased integer; v_earned integer; v_earned_convertible integer;
   v_free_avail integer; v_use_free integer; v_use_purchased integer; v_use_earned integer;
+  v_earned_nonconvertible integer; v_use_earned_convertible integer;
   v_seller_convertible integer; v_seller_nonconv integer;
   v_purchase public.document_purchases;
 begin
@@ -58,8 +59,8 @@ begin
   v_price := coalesce(v_doc.price_credits, 0);
   if v_price <= 0 then raise exception 'price_unavailable' using errcode = 'P0001'; end if;
 
-  select free_credits, purchased_credits, earned_credits
-    into v_free, v_purchased, v_earned
+  select free_credits, purchased_credits, earned_credits, earned_convertible
+    into v_free, v_purchased, v_earned, v_earned_convertible
   from public.user_credit_accounts where owner_id = v_buyer for update;
   if not found then raise exception 'insufficient_credits' using errcode = 'P0001'; end if;
 
@@ -77,11 +78,14 @@ begin
   v_use_free := least(v_free_avail, v_price);
   v_use_purchased := least(v_purchased, v_price - v_use_free);
   v_use_earned := v_price - v_use_free - v_use_purchased;
+  v_earned_nonconvertible := v_earned - v_earned_convertible;
+  v_use_earned_convertible := greatest(0, v_use_earned - v_earned_nonconvertible);
 
   update public.user_credit_accounts
   set free_credits = free_credits - v_use_free,
       purchased_credits = purchased_credits - v_use_purchased,
       earned_credits = earned_credits - v_use_earned,
+      earned_convertible = earned_convertible - v_use_earned_convertible,
       balance = balance - v_price,
       lifetime_spent = lifetime_spent + v_price,
       updated_at = now()
@@ -91,12 +95,29 @@ begin
   values (p_document_id, v_buyer, v_price)
   returning * into v_purchase;
 
-  insert into public.credit_transactions (owner_id, document_id, purchase_id, direction, amount, reason)
-  values (v_buyer, p_document_id, v_purchase.id, 'spent', v_price, 'Acquisto documento');
+  insert into public.credit_transactions (owner_id, document_id, purchase_id, direction, amount, reason, metadata)
+  values (
+    v_buyer,
+    p_document_id,
+    v_purchase.id,
+    'spent',
+    v_price,
+    'Acquisto documento',
+    jsonb_build_object(
+      'free_credits', v_use_free,
+      'purchased_credits', v_use_purchased,
+      'earned_credits', v_use_earned,
+      'earned_convertible', v_use_earned_convertible
+    )
+  );
 
-  v_seller_convertible := floor((v_use_purchased + v_use_earned) * 0.7);
-  v_seller_nonconv := floor(v_use_free * 0.7);
+  v_seller_convertible := floor((v_use_purchased + v_use_earned_convertible) * 0.7);
+  v_seller_nonconv := floor((v_use_free + v_use_earned - v_use_earned_convertible) * 0.7);
   if v_seller_convertible + v_seller_nonconv > 0 then
+    insert into public.user_credit_accounts (owner_id, balance, free_credits, purchased_credits, earned_credits)
+    values (v_doc.owner_id, 0, 0, 0, 0)
+    on conflict (owner_id) do nothing;
+
     update public.user_credit_accounts
     set earned_credits = earned_credits + v_seller_convertible + v_seller_nonconv,
         earned_convertible = earned_convertible + v_seller_convertible,
@@ -106,8 +127,16 @@ begin
     where owner_id = v_doc.owner_id;
 
     if found then
-      insert into public.credit_transactions (owner_id, document_id, purchase_id, direction, amount, reason)
-      values (v_doc.owner_id, p_document_id, v_purchase.id, 'earned', v_seller_convertible + v_seller_nonconv, 'Vendita documento');
+      insert into public.credit_transactions (owner_id, document_id, purchase_id, direction, amount, reason, metadata)
+      values (
+        v_doc.owner_id,
+        p_document_id,
+        v_purchase.id,
+        'earned',
+        v_seller_convertible + v_seller_nonconv,
+        'Vendita documento',
+        jsonb_build_object('convertible', v_seller_convertible, 'non_convertible', v_seller_nonconv)
+      );
     end if;
   end if;
 

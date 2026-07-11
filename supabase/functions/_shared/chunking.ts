@@ -57,65 +57,141 @@ function updateSectionPath(path: string[], title: string, level: 1 | 2 | 3): str
   return next.filter(Boolean)
 }
 
+function splitLongLine(line: string): string[] {
+  const maxChars = OVERLAP_TOKENS * 4
+  if (line.length <= maxChars) return [line]
+  const parts: string[] = []
+  let current = ''
+  for (const word of line.split(/\s+/)) {
+    if (word.length > maxChars) {
+      if (current) parts.push(current)
+      for (let offset = 0; offset < word.length; offset += maxChars) {
+        parts.push(word.slice(offset, offset + maxChars))
+      }
+      current = ''
+      continue
+    }
+    const candidate = current ? `${current} ${word}` : word
+    if (candidate.length > maxChars && current) {
+      parts.push(current)
+      current = word
+    } else {
+      current = candidate
+    }
+  }
+  if (current) parts.push(current)
+  return parts
+}
+
 /** Splits page text into token-bounded, section-aware chunks with overlap. */
 export function chunkPages(pages: PageText[]): BuiltChunk[] {
   const chunks: BuiltChunk[] = []
   let chunkIndex = 0
   let sectionPath: string[] = []
 
-  let buffer: string[] = []
+  type BufferedLine = { text: string; pageNumber: number }
+  let buffer: BufferedLine[] = []
   let bufferTokens = 0
+  let bufferSectionPath: string[] = []
+  // Number of leading buffered lines copied from the previously emitted
+  // chunk. Keeping this separate from fresh text prevents that overlap from
+  // becoming a standalone duplicate at EOF or immediately before a heading.
+  let overlapLineCount = 0
   let pageStart = pages[0]?.pageNumber ?? 1
   let pageEnd = pageStart
 
-  const flush = () => {
-    const content = buffer.join('\n').trim()
-    if (content.length === 0) return
-    if (estimateTokens(content) < TOKEN_MIN && chunks.length > 0) {
-      // Too small to stand alone — fold into the previous chunk.
-      const prev = chunks[chunks.length - 1]
-      prev.content = `${prev.content}\n${content}`.trim()
-      prev.pageEnd = pageEnd
-      prev.tokenEstimate = estimateTokens(prev.content)
-      buffer = []
-      bufferTokens = 0
+  const samePath = (left: string[], right: string[]) =>
+    left.length === right.length && left.every((part, index) => part === right[index])
+
+  const clearBuffer = () => {
+    buffer = []
+    bufferTokens = 0
+    bufferSectionPath = []
+    overlapLineCount = 0
+  }
+
+  const flush = (carryOverlap = true) => {
+    const freshLines = buffer.slice(overlapLineCount)
+    if (freshLines.length === 0) {
+      clearBuffer()
       return
     }
+
+    const content = buffer.map((line) => line.text).join('\n').trim()
+    const freshContent = freshLines.map((line) => line.text).join('\n').trim()
+    if (content.length === 0 || freshContent.length === 0) {
+      clearBuffer()
+      return
+    }
+    if (
+      estimateTokens(freshContent) < TOKEN_MIN
+      && chunks.length > 0
+      && samePath(chunks[chunks.length - 1].sectionPath, bufferSectionPath)
+    ) {
+      // Fold only into the same section; crossing a heading would corrupt the
+      // chapter/section metadata used by citations and flashcard filters. Only
+      // append fresh text: the overlap is already present in the prior chunk.
+      const prev = chunks[chunks.length - 1]
+      const mergedContent = `${prev.content}\n${freshContent}`.trim()
+      const mergedTokens = estimateTokens(mergedContent)
+      if (mergedTokens <= TOKEN_MAX) {
+        prev.content = mergedContent
+        prev.pageEnd = freshLines.at(-1)?.pageNumber ?? pageEnd
+        prev.tokenEstimate = mergedTokens
+        clearBuffer()
+        return
+      }
+    }
+    const flushedSectionPath = [...bufferSectionPath]
     chunks.push({
       chunkIndex: chunkIndex++,
       pageStart,
       pageEnd,
-      sectionPath: [...sectionPath],
+      sectionPath: [...bufferSectionPath],
       content,
       tokenEstimate: estimateTokens(content),
     })
     // Carry a small overlap tail into the next chunk for context continuity.
-    const tail: string[] = []
+    const tail: BufferedLine[] = []
     let tailTokens = 0
-    for (let i = buffer.length - 1; i >= 0 && tailTokens < OVERLAP_TOKENS; i -= 1) {
+    for (let i = buffer.length - 1; carryOverlap && i >= 0 && tailTokens < OVERLAP_TOKENS; i -= 1) {
+      const lineTokens = estimateTokens(buffer[i].text)
+      if (tail.length > 0 && tailTokens + lineTokens > OVERLAP_TOKENS) break
       tail.unshift(buffer[i])
-      tailTokens += estimateTokens(buffer[i])
+      tailTokens += lineTokens
     }
     buffer = tail
     bufferTokens = tailTokens
-    pageStart = pageEnd
+    bufferSectionPath = tail.length > 0 ? flushedSectionPath : []
+    overlapLineCount = tail.length
+    pageStart = tail[0]?.pageNumber ?? pageEnd
+    pageEnd = tail.at(-1)?.pageNumber ?? pageEnd
   }
 
   for (const page of pages) {
     const lines = page.text.split(/\r?\n/)
-    for (const line of lines) {
-      const heading = isHeading(line)
+    for (const rawLine of lines) {
+      const heading = isHeading(rawLine)
       if (heading) {
-        // Start a fresh chunk at a heading boundary if the current one is sizeable.
-        if (bufferTokens >= TOKEN_TARGET * 0.6) flush()
+        // A heading always starts a new semantic section. Do not carry overlap
+        // from the previous section or label preceding prose with the new one.
+        if (buffer.length > 0) flush(false)
         sectionPath = updateSectionPath(sectionPath, heading.title, heading.level)
       }
-      if (line.trim().length === 0) continue
-      buffer.push(line)
-      bufferTokens += estimateTokens(line)
-      pageEnd = page.pageNumber
-      if (bufferTokens >= TOKEN_MAX) flush()
-      else if (bufferTokens >= TOKEN_TARGET && /[.!?]$/.test(line.trim())) flush()
+      if (rawLine.trim().length === 0) continue
+      for (const line of splitLongLine(rawLine)) {
+        const lineTokens = estimateTokens(line)
+        if (bufferTokens >= TOKEN_MIN && bufferTokens + lineTokens > TOKEN_MAX) flush()
+        if (buffer.length === 0) {
+          pageStart = page.pageNumber
+          bufferSectionPath = [...sectionPath]
+        }
+        buffer.push({ text: line, pageNumber: page.pageNumber })
+        bufferTokens += lineTokens
+        pageEnd = page.pageNumber
+        if (bufferTokens >= TOKEN_MAX) flush()
+        else if (bufferTokens >= TOKEN_TARGET && /[.!?]$/.test(line.trim())) flush()
+      }
     }
   }
   flush()

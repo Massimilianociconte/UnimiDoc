@@ -10,14 +10,18 @@ UnimiDoc non è affiliata con l'Università degli Studi di Milano.
 
 ## Pagine principali
 
-- [Esplora appunti](https://unimidoc.it/app): catalogo filtrabile per materia e docente
-- [Premium](https://unimidoc.it/premium): anteprime complete e download senza attese
-- [Carica appunti](https://unimidoc.it/upload): upload con revisione e crediti di ricompensa
+- [Esplora appunti](https://unimidoc.netlify.app/app): catalogo filtrabile per materia e docente
+- [Premium](https://unimidoc.netlify.app/premium): anteprime complete e download senza attese
+- [Carica appunti](https://unimidoc.netlify.app/upload): upload con revisione e crediti di ricompensa
+- [Privacy](https://unimidoc.netlify.app/privacy): dati, finalità, conservazione e diritti
+- [Termini](https://unimidoc.netlify.app/termini): regole per account, materiali e strumenti AI
+- [Vendite e rimborsi](https://unimidoc.netlify.app/condizioni-di-vendita): crediti, Premium, recesso e payout
+- [Copyright e segnalazioni](https://unimidoc.netlify.app/copyright-segnalazioni): procedura per diritti e contenuti sensibili
 
 ## Schede documento
 
 Ogni documento vive su un URL proprio con schema
-`https://unimidoc.it/appunti/{materia}/{titolo}` e markup Schema.org
+`https://unimidoc.netlify.app/appunti/{materia}/{titolo}` e markup Schema.org
 LearningResource (materia, docente, ateneo, valutazioni, download).
 
 ## Materie coperte

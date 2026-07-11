@@ -18,8 +18,10 @@ import {
 } from '../_shared/supabase.ts'
 import { deepseekChat, deepseekCost } from '../_shared/ai.ts'
 import { buildAiHelpPrompt, type AiHelpMode } from '../_shared/prompts.ts'
+import { retrieveRagMatches, formatRagContext } from '../_shared/rag.ts'
 
 const MODES: AiHelpMode[] = ['explain', 'followup', 'example', 'memo', 'visualize']
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const PROMPT_VERSION: Record<AiHelpMode, string> = {
   explain: config.promptVersions.explain,
@@ -62,6 +64,26 @@ const PROMPT_VERSION: Record<AiHelpMode, string> = {
 
     const language = String(body.language ?? 'it')
     const sourceText = body.sourceText ? String(body.sourceText).slice(0, config.limits.maxSourceCharsExplain) : null
+
+    // RAG grounding (best-effort): when the flashcard belongs to an indexed
+    // document, retrieve the chunks most relevant to the question so every
+    // help mode answers from the actual document, not just the card text.
+    // Uses the caller's JWT → the match_rag_chunks access rule applies.
+    const ragDocumentId = typeof body.documentId === 'string' && UUID_RE.test(body.documentId) ? body.documentId : null
+    let ragContext: string | null = null
+    if (ragDocumentId) {
+      const ragQuery = [question, mode === 'followup' ? String(body.followupQuestion ?? '') : correctAnswer]
+        .filter(Boolean)
+        .join('\n')
+      const matches = await retrieveRagMatches(req, {
+        query: ragQuery,
+        documentIds: [ragDocumentId],
+        matchCount: 4,
+        minSimilarity: 0.25,
+      })
+      if (matches && matches.length > 0) ragContext = formatRagContext(matches, 5500)
+    }
+
     const ctx = {
       question,
       correctAnswer,
@@ -71,6 +93,7 @@ const PROMPT_VERSION: Record<AiHelpMode, string> = {
       previousExplanation: body.previousExplanation ? String(body.previousExplanation) : null,
       followupQuestion: body.followupQuestion ? String(body.followupQuestion) : null,
       language,
+      ragContext,
     }
 
     // The key must cover EVERY input that changes the prompt, otherwise a
@@ -89,6 +112,7 @@ const PROMPT_VERSION: Record<AiHelpMode, string> = {
       ctx.followupQuestion,
       ctx.previousExplanation,
       sourceText,
+      ragContext,
     ])
 
     const cached = (await getCached(admin, key)) as { content: string } | null

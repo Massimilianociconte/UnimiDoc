@@ -66,10 +66,11 @@ setAccessTokenProvider(async () => (await supabase.auth.getSession()).data.sessi
 
 ## Guarantees
 
-- **Premium gating** — every AI function calls `requirePremium()` (reads
-  `user_entitlements.plan` / `ai_flashcards_enabled` / `premium_until`
-  server-side). A tampered client flag cannot unlock paid generations. Free
-  users get a `402` paywall.
+- **Server-side entitlement gating** — `ai-help`, `generate-outline` and
+  `image-occlusion` require an active Premium plan. `generate-flashcards`
+  additionally accepts the dedicated `ai_flashcards_enabled` grant without
+  unlocking other Premium APIs. A tampered client flag cannot unlock paid
+  generations; unauthorized users get a `402` paywall.
 - **Protected previews** — `document-access` returns only short-lived signed
   URLs for allowed preview images unless the caller is owner/buyer/premium
   according to the document policy.

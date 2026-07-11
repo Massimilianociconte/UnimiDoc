@@ -24,10 +24,14 @@ export async function requireUser(req: Request): Promise<{ id: string; supabase:
 }
 
 // --------------------------------------------------------------------------
-// Entitlements — read from public.user_entitlements (plan / premium_until /
-// ai_flashcards_enabled). Premium AI access requires an active paid plan.
+// Entitlements — plan access and feature-specific grants are deliberately
+// separate. A flashcard-only grant must never unlock unrelated Premium APIs.
 // --------------------------------------------------------------------------
-export type Entitlement = { isPremium: boolean; plan: string }
+export type Entitlement = {
+  isPremium: boolean
+  canUseAiFlashcards: boolean
+  plan: string
+}
 
 export async function getEntitlement(admin: SupabaseClient, userId: string): Promise<Entitlement> {
   const { data } = await admin
@@ -36,15 +40,25 @@ export async function getEntitlement(admin: SupabaseClient, userId: string): Pro
     .eq('owner_id', userId)
     .maybeSingle()
 
-  const notExpired = !data?.premium_until || new Date(data.premium_until) > new Date()
-  const isPremium = Boolean(data) && notExpired && (data!.plan === 'premium' || data!.ai_flashcards_enabled === true)
-  return { isPremium, plan: data?.plan ?? 'free' }
+  const premiumNotExpired = !data?.premium_until || new Date(data.premium_until) > new Date()
+  const isPremium = Boolean(data) && data!.plan === 'premium' && premiumNotExpired
+  const canUseAiFlashcards = isPremium || data?.ai_flashcards_enabled === true
+  return { isPremium, canUseAiFlashcards, plan: data?.plan ?? 'free' }
 }
 
-/** Throws a 402 paywall if the user is not on an active paid/AI-enabled plan. */
+/** Throws a 402 paywall unless the user has an active Premium plan. */
 export async function requirePremium(admin: SupabaseClient, userId: string): Promise<Entitlement> {
   const entitlement = await getEntitlement(admin, userId)
   if (!entitlement.isPremium) throw errors.paywall()
+  return entitlement
+}
+
+/** Allows Premium users and explicit flashcard-only feature grants. */
+export async function requireAiFlashcards(admin: SupabaseClient, userId: string): Promise<Entitlement> {
+  const entitlement = await getEntitlement(admin, userId)
+  if (!entitlement.canUseAiFlashcards) {
+    throw errors.paywall('Generazione AI delle flashcard non abilitata per questo account.')
+  }
   return entitlement
 }
 

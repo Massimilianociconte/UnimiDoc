@@ -1,4 +1,6 @@
 import { createClient, type Session, type User } from '@supabase/supabase-js'
+import type { DocumentItem, DocumentStatus } from '../data'
+import type { DocumentInsights } from './pdfProcessing'
 
 export type AppAuthUser = {
   id: string
@@ -76,6 +78,184 @@ export async function getUserCreditBalance(): Promise<number | null> {
     .eq('owner_id', uid)
     .maybeSingle()
   return (account as { balance: number } | null)?.balance ?? null
+}
+
+export type SellerProfilePreferences = {
+  publicDisplayName: string
+  enabled: boolean
+}
+
+export async function loadSellerProfilePreferences(userId: string): Promise<SellerProfilePreferences> {
+  if (!supabase) return { publicDisplayName: '', enabled: false }
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('public_display_name, seller_profile_enabled')
+    .eq('id', userId)
+    .maybeSingle()
+  if (error) throw error
+  return {
+    publicDisplayName: String(data?.public_display_name ?? ''),
+    enabled: data?.seller_profile_enabled === true,
+  }
+}
+
+export async function saveSellerProfilePreferences(
+  userId: string,
+  preferences: SellerProfilePreferences,
+): Promise<SellerProfilePreferences> {
+  if (!supabase) throw new Error('Profilo pubblico non configurato.')
+  const publicDisplayName = preferences.publicDisplayName.trim()
+  if (preferences.enabled && (publicDisplayName.length < 2 || publicDisplayName.length > 80)) {
+    throw new Error('Il nome pubblico deve contenere da 2 a 80 caratteri.')
+  }
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({
+      public_display_name: publicDisplayName || null,
+      seller_profile_enabled: preferences.enabled,
+    })
+    .eq('id', userId)
+    .select('public_display_name, seller_profile_enabled')
+    .single()
+  if (error) throw error
+  return {
+    publicDisplayName: String(data.public_display_name ?? ''),
+    enabled: data.seller_profile_enabled === true,
+  }
+}
+
+export type DocumentPurchase = {
+  id: string
+  document_id: string
+  buyer_id: string
+  credits_spent: number
+  created_at: string
+}
+
+type CatalogRow = {
+  id: string
+  owner_id?: string
+  seller_id?: string | null
+  title: string
+  course_name: string
+  professor: string | null
+  academic_year: string | null
+  page_count: number | null
+  language: string | null
+  preview_policy: string
+  description: string | null
+  exam_type: string | null
+  semester: string | null
+  degree_course: string | null
+  university: string | null
+  tags: string[] | null
+  compatible_exams: string[] | null
+  insights: DocumentInsights | null
+  price_credits: number | null
+  flashcard_quality_percent?: number | null
+  flashcard_reviewer_count?: number | null
+  created_at: string
+  updated_at: string
+  visibility?: 'private' | 'submitted' | 'published' | 'rejected'
+  original_size_bytes?: number | null
+}
+
+const CATALOG_COLUMNS = 'id, seller_id, title, course_name, professor, academic_year, page_count, language, preview_policy, description, exam_type, semester, degree_course, university, tags, compatible_exams, insights, price_credits, flashcard_quality_percent, flashcard_reviewer_count, created_at, updated_at'
+
+function documentStatus(visibility: CatalogRow['visibility']): DocumentStatus {
+  if (visibility === 'rejected') return 'rejected'
+  if (visibility === 'private' || visibility === 'submitted') return 'pendingreview'
+  return 'approved'
+}
+
+function mapCatalogDocument(row: CatalogRow, uploader: string, ownerView = false, sellerPublic = true): DocumentItem {
+  const flags = row.insights?.contentFlags
+  const previewKind: DocumentItem['previewKind'] = flags?.hasExercises
+    ? 'exercise'
+    : flags?.hasDiagrams
+      ? 'diagram'
+      : 'notes'
+  const createdAt = new Date(row.created_at)
+  return {
+    id: row.id,
+    title: row.title,
+    subject: row.course_name,
+    professor: row.professor ?? 'Docente non indicato',
+    academicYear: row.academic_year ?? 'Non specificato',
+    type: 'Appunti delle lezioni',
+    examType: row.exam_type ?? 'Non specificato',
+    pages: row.page_count ?? 0,
+    sizeMb: row.original_size_bytes ? Math.round((row.original_size_bytes / 1024 / 1024) * 10) / 10 : 0,
+    quality: row.flashcard_quality_percent ? Math.round(row.flashcard_quality_percent) / 10 : 0,
+    flashcardQualityPercent: row.flashcard_quality_percent ?? undefined,
+    flashcardQualityVotes: row.flashcard_reviewer_count ?? undefined,
+    credits: row.price_credits ?? 0,
+    downloads: 0,
+    description: row.description ?? 'Materiale universitario in catalogo.',
+    status: ownerView ? documentStatus(row.visibility) : 'approved',
+    verified: ownerView ? row.visibility === 'published' : true,
+    premium: row.preview_policy === 'premium_full',
+    uploader,
+    sellerId: row.seller_id ?? undefined,
+    sellerPublic,
+    uploaderTrust: 0,
+    fileHash: `catalog-${row.id}`,
+    malwareScan: ownerView && row.visibility !== 'published' ? 'in corso' : 'pulito',
+    copyrightRisk: 'basso',
+    reportCount: 0,
+    uploadedAt: Number.isNaN(createdAt.getTime()) ? '' : createdAt.toLocaleString('it-IT'),
+    language: row.language === 'en' ? 'Inglese' : 'Italiano',
+    previewKind,
+    insights: row.insights ?? undefined,
+    degreeCourse: row.degree_course ?? undefined,
+    university: row.university ?? undefined,
+    semester: row.semester ?? undefined,
+    tags: row.tags ?? [],
+    compatibleExams: row.compatible_exams ?? [],
+  }
+}
+
+export async function loadPublicDocumentCatalog(): Promise<DocumentItem[]> {
+  if (!supabase) return []
+  const [catalog, sellers] = await Promise.all([
+    supabase.from('public_document_catalog').select(CATALOG_COLUMNS).order('created_at', { ascending: false }),
+    supabase.from('public_seller_profiles').select('id, public_display_name'),
+  ])
+  if (catalog.error) throw catalog.error
+  const sellerNames = new Map(
+    ((sellers.data ?? []) as Array<{ id: string; public_display_name: string }>).map((seller) => [seller.id, seller.public_display_name]),
+  )
+  return ((catalog.data ?? []) as unknown as CatalogRow[]).map((row) => {
+    const publicName = row.seller_id ? sellerNames.get(row.seller_id) : undefined
+    return mapCatalogDocument(row, publicName ?? 'Profilo venditore privato', false, Boolean(publicName))
+  })
+}
+
+export async function loadOwnedDocuments(userId: string): Promise<DocumentItem[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase
+    .from('documents')
+    .select('id, owner_id, title, course_name, professor, academic_year, page_count, language, preview_policy, description, exam_type, semester, degree_course, university, tags, compatible_exams, insights, price_credits, created_at, updated_at, visibility, original_size_bytes')
+    .eq('owner_id', userId)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return ((data ?? []) as unknown as CatalogRow[]).map((row) => mapCatalogDocument(row, 'Tu', true))
+}
+
+/** Execute the authoritative atomic purchase RPC. Never deduct credits in UI. */
+export async function purchaseDocument(documentId: string): Promise<DocumentPurchase> {
+  if (!supabase) throw new Error('Acquisti non configurati.')
+  const { data, error } = await supabase.rpc('purchase_document', { p_document_id: documentId })
+  if (error) {
+    const detail = `${error.code ?? ''} ${error.message ?? ''} ${error.details ?? ''}`.toLowerCase()
+    if (detail.includes('insufficient_credits')) throw new Error('Crediti insufficienti per questo materiale.')
+    if (detail.includes('own_document')) throw new Error('Il materiale è già tuo: aprilo dalla libreria.')
+    if (detail.includes('not_purchasable')) throw new Error('Questo materiale non è ancora acquistabile.')
+    if (detail.includes('document_not_found')) throw new Error('Materiale non trovato o non più disponibile.')
+    throw new Error('Acquisto non completato. Il saldo non è stato modificato.')
+  }
+  if (!data) throw new Error('Il server non ha confermato l’acquisto.')
+  return data as DocumentPurchase
 }
 
 export function subscribeSupabaseAuth(onUser: (user: AppAuthUser | null) => void) {

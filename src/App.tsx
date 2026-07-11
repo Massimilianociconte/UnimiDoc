@@ -21,6 +21,7 @@ import {
   Eye,
   Filter,
   GraduationCap,
+  Gift,
   Highlighter,
   Layers,
   ListChecks,
@@ -55,24 +56,24 @@ import {
   Wallet,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import creditToken from './assets/generated/credit-token.webp'
 import creditsAccumulate from './assets/generated/credits-accumulate.webp'
 import creditsCommunity from './assets/generated/credits-community.webp'
 import creditsEarn from './assets/generated/credits-earn.webp'
 import creditsUnlock from './assets/generated/credits-unlock.webp'
-import demoDocumentImage from './assets/generated/demo-document.png'
+import demoDocumentImage from './assets/generated/demo-document.webp'
 import demoPage01 from './assets/generated/demo-page-01.webp'
 import demoPage02 from './assets/generated/demo-page-02.webp'
 import demoPage03 from './assets/generated/demo-page-03.webp'
 import demoPage04 from './assets/generated/demo-page-04.webp'
-import heroDocuments from './assets/generated/hero-documents.png'
-import libraryNotes from './assets/generated/library-notes.png'
-import loginStudy from './assets/generated/login-study.png'
-import logoMark from './assets/generated/logo-mark.png'
-import premiumStack from './assets/generated/premium-stack.png'
-import uploadBackpack from './assets/generated/upload-backpack.png'
+import heroDocuments from './assets/generated/hero-documents.webp'
+import libraryNotes from './assets/generated/library-notes.webp'
+import loginStudy from './assets/generated/login-study.webp'
+import logoMark from './assets/generated/logo-mark.webp'
+import premiumStack from './assets/generated/premium-stack.webp'
+import uploadBackpack from './assets/generated/upload-backpack.webp'
 import {
   allL13Professors,
   featuredCourses,
@@ -92,14 +93,20 @@ import {
   getSupabaseSessionUser,
   getUserCreditBalance,
   isSupabaseConfigured,
+  loadOwnedDocuments,
+  loadPublicDocumentCatalog,
+  loadSellerProfilePreferences,
+  purchaseDocument,
   supabase,
   requestPasswordReset,
+  saveSellerProfilePreferences,
   signInWithEmail,
   signInWithGoogle,
   signOutSupabase,
   signUpWithEmail,
   subscribeSupabaseAuth,
   type AppAuthUser,
+  type SellerProfilePreferences,
 } from './lib/supabaseClient'
 import type {
   CompressionResult,
@@ -114,11 +121,13 @@ import { getPremiumState, refreshPremiumState, setPremiumState } from './lib/ent
 import { AskDocumentPanel } from './components/rag/AskDocumentPanel'
 import {
   autoDetectOcclusion,
+  cancelDocumentUpload,
   createDocumentUpload,
+  finalizeDocumentUpload,
   generatePremiumFlashcards as generateBackendPremiumFlashcards,
   generatePremiumOutline,
-  ragIndexDocument,
   requestAiHelp,
+  saveReviewedFlashcards,
   setAccessTokenProvider,
   submitSrsReview,
   type AiHelpMode,
@@ -127,8 +136,10 @@ import {
 import { buildUserDashboardData, loadDashboardLiveOverlay, type DashboardLiveOverlay } from './userDashboardData'
 import {
   EMPTY_FLASHCARD_FILTERS,
+  flashcardProgressId,
   filterFlashcardRecords,
   isPersistedFlashcardId,
+  loadRemoteFlashcardSrs,
   loadFlashcardDashboardData,
   recordLocalFlashcardOutcome,
   recordRemoteFlashcardOutcome,
@@ -142,7 +153,14 @@ import {
   type FlashcardQualityVote,
   type FlashcardStudyRecord,
 } from './lib/flashcardProgress'
-import { creditsToEur, creditTier, documentCreditPrice, revenueSplit, tierLabel, TOPUP_PACKS, WELCOME_CREDITS } from './lib/creditPricing'
+import {
+  creditsToEur,
+  creditTier,
+  effectiveDocumentPrice,
+  MIN_DOCUMENT_PRICE,
+  tierLabel,
+  WELCOME_CREDITS,
+} from './lib/creditPricing'
 import { moderatePublicText } from './lib/contentModeration'
 import {
   addEarnedCredits,
@@ -178,8 +196,20 @@ import {
   type NotificationChannel,
   type NotificationPrefs,
 } from './lib/notificationPrefs'
+import {
+  cancelAccountErasure,
+  exportAccountData,
+  loadPrivacyRequests,
+  requestAccountErasure,
+  type PrivacyRequest,
+} from './lib/privacyClient'
+import type { LegalRoute } from './legalContent'
 
-type Route = 'landing' | 'login' | 'signup' | 'app' | 'premium' | 'upload' | 'library' | 'dashboard' | 'settings' | 'document' | 'profile'
+const BillingPlans = lazy(() => import('./components/BillingPlans').then((module) => ({ default: module.BillingPlans })))
+const LegalPage = lazy(() => import('./components/LegalPage').then((module) => ({ default: module.LegalPage })))
+const SellerPayoutPanel = lazy(() => import('./components/SellerPayoutPanel').then((module) => ({ default: module.SellerPayoutPanel })))
+
+type Route = 'landing' | 'login' | 'signup' | 'app' | 'premium' | 'upload' | 'library' | 'dashboard' | 'settings' | 'document' | 'profile' | LegalRoute
 type AuthMode = 'login' | 'signup'
 type AuthProvider = 'email' | 'google'
 
@@ -202,7 +232,7 @@ const featuredCourseCards = featuredCourses
 
 const courseStats = landingCourses.map((course, index) => ({
   ...course,
-  count: `${1840 - index * 47} appunti`,
+  count: index < 3 ? 'Materia in evidenza' : 'Catalogo L-13',
 }))
 
 const featuredFilterSubjects = featuredCourseCards.map((course) => course.name)
@@ -262,6 +292,11 @@ const routePaths: Record<Route, string> = {
   settings: '/impostazioni',
   document: '/appunti',
   profile: '/autore',
+  privacy: '/privacy',
+  terms: '/termini',
+  cookies: '/cookie',
+  sales: '/condizioni-di-vendita',
+  copyright: '/copyright-segnalazioni',
 }
 
 const routeSeo: Record<Route, { title: string; description: string }> = {
@@ -311,6 +346,26 @@ const routeSeo: Record<Route, { title: string; description: string }> = {
     title: 'Profilo autore - UnimiDoc',
     description: 'Profilo pubblico di un autore UnimiDoc: materiali, valutazioni, vendite e affidabilità per Scienze Biologiche L-13.',
   },
+  privacy: {
+    title: 'Informativa privacy - UnimiDoc',
+    description: 'Come UnimiDoc tratta dati account, materiali, studio e transazioni.',
+  },
+  terms: {
+    title: 'Termini di utilizzo - UnimiDoc',
+    description: 'Regole del servizio, account, contenuti e strumenti di studio UnimiDoc.',
+  },
+  cookies: {
+    title: 'Cookie e tecnologie locali - UnimiDoc',
+    description: 'Tecnologie necessarie, preferenze e criteri per eventuali strumenti facoltativi.',
+  },
+  sales: {
+    title: 'Condizioni di vendita, crediti e rimborsi - UnimiDoc',
+    description: 'Regole economiche per ricariche, Premium, contenuti digitali e venditori.',
+  },
+  copyright: {
+    title: 'Copyright e segnalazioni - UnimiDoc',
+    description: 'Come segnalare contenuti che violano diritti o contengono dati non autorizzati.',
+  },
 }
 
 const demoDocument = {
@@ -343,12 +398,17 @@ const demoPageImages = [
 function routeFromPathname(pathname: string): Route {
   if (pathname === '/login') return 'login'
   if (pathname === '/signup') return 'signup'
-  if (pathname === '/app' || pathname === '/esplora') return 'app'
+  if (pathname === '/app' || pathname === '/esplora' || pathname === '/appunti') return 'app'
   if (pathname === '/premium' || pathname === '/pricing') return 'premium'
   if (pathname === '/upload' || pathname === '/carica') return 'upload'
   if (pathname === '/dashboard' || pathname === '/area-riservata') return 'dashboard'
   if (pathname === '/library' || pathname === '/libreria') return 'library'
   if (pathname === '/impostazioni' || pathname === '/settings') return 'settings'
+  if (pathname === '/privacy' || pathname === '/privacy-policy') return 'privacy'
+  if (pathname === '/termini' || pathname === '/terms') return 'terms'
+  if (pathname === '/cookie' || pathname === '/cookie-policy') return 'cookies'
+  if (pathname === '/condizioni-di-vendita' || pathname === '/rimborsi') return 'sales'
+  if (pathname === '/copyright-segnalazioni' || pathname === '/segnalazioni') return 'copyright'
   if (pathname.startsWith('/appunti/')) return 'document'
   if (pathname.startsWith('/autore/')) return 'profile'
   return 'landing'
@@ -356,6 +416,10 @@ function routeFromPathname(pathname: string): Route {
 
 function authModeFromRoute(route: Route): AuthMode {
   return route === 'signup' ? 'signup' : 'login'
+}
+
+function isLegalRoute(route: Route): route is LegalRoute {
+  return route === 'privacy' || route === 'terms' || route === 'cookies' || route === 'sales' || route === 'copyright'
 }
 
 function subjectFromSearch() {
@@ -452,7 +516,7 @@ function useBodyScrollLock(active = true) {
 function LogoMark() {
   return (
     <span className="brand-icon" aria-hidden="true">
-      <img src={logoMark} alt="" />
+      <img src={logoMark} alt="" width={512} height={512} />
     </span>
   )
 }
@@ -828,7 +892,7 @@ function DemoDocumentModal({ onClose, onPremium }: { onClose: () => void; onPrem
             <DemoPageViewer />
           </div>
           <aside className="demo-modal-aside">
-            <img src={demoDocumentImage} alt="" />
+            <img src={demoDocumentImage} alt="" loading="lazy" decoding="async" width={1568} height={1003} />
             <h3>Prova come funziona l’anteprima</h3>
             <p>Leggi la parte gratuita, poi il contenuto si sfuma e resta protetto fino allo sblocco.</p>
             <button className="premium-button" onClick={onPremium} type="button">
@@ -891,13 +955,13 @@ function LandingPage({
             ))}
           </div>
           <div className="trust-row">
-            <span><ShieldCheck size={18} /> Verificati dagli studenti</span>
-            <span><User size={18} /> Oltre 12.000 studenti</span>
+            <span><ShieldCheck size={18} /> Revisione prima della pubblicazione</span>
+            <span><User size={18} /> Pensato per studenti UniMi</span>
             <span><Lock size={18} /> Sicuro e indipendente</span>
           </div>
         </div>
         <div className="hero-visual">
-          <img src={heroDocuments} alt="Anteprime di appunti di biologia verificati" />
+          <img src={heroDocuments} alt="Anteprime di appunti di biologia verificati" fetchPriority="high" decoding="async" width={1536} height={1024} />
         </div>
       </section>
 
@@ -1014,7 +1078,7 @@ function LandingPage({
           <small>Disdici quando vuoi. Nessun vincolo.</small>
         </div>
         <div className="premium-card">
-          <img src={premiumStack} alt="Illustrazione premium UnimiDoc" />
+          <img src={premiumStack} alt="Illustrazione premium UnimiDoc" loading="lazy" decoding="async" width={1254} height={1254} />
           <ul>
             {premiumBenefits.map((benefit) => (
               <li key={benefit}><Check size={17} /> {benefit}</li>
@@ -1024,9 +1088,9 @@ function LandingPage({
       </section>
 
       <section className="contributor-cta section-wrap">
-        <img src={uploadBackpack} alt="Carica appunti e guadagna crediti" />
+        <img src={uploadBackpack} alt="Carica appunti e guadagna crediti" loading="lazy" decoding="async" width={1536} height={1024} />
         <div>
-          <h2>I tuoi appunti possono aiutare migliaia di studenti</h2>
+          <h2>I tuoi appunti possono aiutare altri studenti</h2>
           <p>Carica materiali tuoi, guadagna crediti e lascia il segno nella community.</p>
           <button className="primary-action" onClick={() => onRoute('upload')} type="button">
             <Upload size={18} />
@@ -1038,7 +1102,7 @@ function LandingPage({
       <section className="final-cta section-wrap">
         <div>
           <h2>Pronto a studiare meglio?</h2>
-          <p>Unisciti a studenti che hanno già semplificato il loro studio.</p>
+          <p>Crea il tuo spazio e conserva soltanto attività e materiali realmente registrati.</p>
         </div>
         <div>
           <button className="secondary-action" onClick={() => onAuth('login')} type="button">Accedi</button>
@@ -1053,6 +1117,11 @@ function LandingPage({
           <button onClick={() => onRoute('premium')} type="button">Premium</button>
           <button onClick={() => onRoute('upload')} type="button">Carica appunti</button>
           <button onClick={() => onAuth('login')} type="button">Accedi</button>
+          <button onClick={() => onRoute('privacy')} type="button">Privacy</button>
+          <button onClick={() => onRoute('terms')} type="button">Termini</button>
+          <button onClick={() => onRoute('cookies')} type="button">Cookie</button>
+          <button onClick={() => onRoute('sales')} type="button">Vendite e rimborsi</button>
+          <button onClick={() => onRoute('copyright')} type="button">Segnalazioni</button>
         </nav>
         <p>UnimiDoc è un progetto indipendente e non è affiliato con l’Università degli Studi di Milano.</p>
       </footer>
@@ -1102,8 +1171,12 @@ function DocumentCard({
         {document.flashcardQualityPercent ? <span><BrainCircuit size={14} /> {document.flashcardQualityPercent}% utili</span> : null}
       </div>
       <div className="note-meta">
-        <span><Star size={15} /> {document.quality.toFixed(1)} ({document.downloads})</span>
-        <strong><CreditIcon size="xs" /> {documentCreditPrice(document)} crediti</strong>
+        <span>
+          {document.quality > 0
+            ? <><Star size={15} /> {document.quality.toFixed(1)}{document.downloads > 0 ? ` (${document.downloads})` : ''}</>
+            : <><Sparkles size={15} /> Nuovo</>}
+        </span>
+        <strong><CreditIcon size="xs" /> {effectiveDocumentPrice(document)} crediti</strong>
       </div>
       <div className="note-actions">
         <button className="secondary-action" onClick={() => onPreview?.(document)} type="button"><Eye size={16} /> Anteprima</button>
@@ -1119,7 +1192,9 @@ function DocumentCard({
 // Classifica autori: parametri pubblici (download, qualità media, affidabilità)
 // così chi carica materiale migliore guadagna visibilità e vendite.
 type UploaderRankEntry = {
+  id: string
   name: string
+  sellerId?: string
   documents: number
   downloads: number
   quality: number
@@ -1135,15 +1210,17 @@ type UploaderRankEntry = {
 // costanza — non il semplice numero di documenti. I documenti oltre i primi
 // pesano meno (rendimento decrescente) così spammare upload non scala il punteggio.
 function buildUploaderRanking(documents: DocumentItem[]): UploaderRankEntry[] {
-  const byUploader = new Map<string, DocumentItem[]>()
-  for (const document of documents) {
-    const list = byUploader.get(document.uploader) ?? []
-    list.push(document)
-    byUploader.set(document.uploader, list)
+  const byUploader = new Map<string, { name: string; sellerId?: string; documents: DocumentItem[] }>()
+  for (const document of documents.filter((item) => item.sellerPublic !== false)) {
+    const id = document.sellerId ?? `name:${document.uploader}`
+    const group = byUploader.get(id) ?? { name: document.uploader, sellerId: document.sellerId, documents: [] }
+    group.documents.push(document)
+    byUploader.set(id, group)
   }
 
   return Array.from(byUploader.entries())
-    .map(([name, docs]) => {
+    .map(([id, group]) => {
+      const { name, sellerId, documents: docs } = group
       const downloads = docs.reduce((total, doc) => total + doc.downloads, 0)
       const quality = docs.reduce((total, doc) => total + doc.quality, 0) / docs.length
       const flashcardQualityDocs = docs.filter((doc) => typeof doc.flashcardQualityPercent === 'number')
@@ -1166,7 +1243,7 @@ function buildUploaderRanking(documents: DocumentItem[]): UploaderRankEntry[] {
           reliability + // affidabilità
           consistency * 5, // costanza
       )
-      return { name, documents: docs.length, downloads, quality, trust, rating, reviews, reports, flashcardQuality, score: Math.max(0, score) }
+      return { id, name, sellerId, documents: docs.length, downloads, quality, trust, rating, reviews, reports, flashcardQuality, score: Math.max(0, score) }
     })
     .sort((a, b) => b.score - a.score)
 }
@@ -1175,15 +1252,23 @@ function authorSlug(name: string): string {
   return slugify(name)
 }
 
-function findUploaderBySlug(pathname: string, documents: DocumentItem[]): string | null {
+type PublicProfileRef = { name: string; sellerId?: string }
+
+function publicProfilePath(profile: PublicProfileRef): string {
+  return `${routePaths.profile}/${profile.sellerId ?? authorSlug(profile.name)}`
+}
+
+function findUploaderBySlug(pathname: string, documents: DocumentItem[]): PublicProfileRef | null {
   const match = pathname.match(/^\/autore\/([^/]+)\/?$/)
   if (!match) return null
   const wanted = match[1]
-  const names = Array.from(new Set(documents.map((document) => document.uploader)))
-  return names.find((name) => slugify(name) === wanted) ?? null
+  const byStableId = documents.find((document) => document.sellerPublic !== false && document.sellerId === wanted)
+  if (byStableId) return { name: byStableId.uploader, sellerId: byStableId.sellerId }
+  const demo = documents.find((document) => !document.sellerId && document.sellerPublic !== false && slugify(document.uploader) === wanted)
+  return demo ? { name: demo.uploader } : null
 }
 
-function UploaderLeaderboard({ documents, onOpenProfile }: { documents: DocumentItem[]; onOpenProfile: (name: string) => void }) {
+function UploaderLeaderboard({ documents, onOpenProfile }: { documents: DocumentItem[]; onOpenProfile: (name: string, sellerId?: string) => void }) {
   const ranking = useMemo(() => buildUploaderRanking(documents).slice(0, 5), [documents])
   if (!ranking.length) return null
 
@@ -1198,10 +1283,10 @@ function UploaderLeaderboard({ documents, onOpenProfile }: { documents: Document
       </div>
       <ol className="leaderboard-list">
         {ranking.map((entry, index) => (
-          <li key={entry.name}>
+          <li key={entry.id}>
             <span className={`leaderboard-rank rank-${index + 1}`}>{index + 1}</span>
             <div>
-              <button className="leaderboard-name" onClick={() => onOpenProfile(entry.name)} type="button">{entry.name}</button>
+              <button className="leaderboard-name" onClick={() => onOpenProfile(entry.name, entry.sellerId)} type="button">{entry.name}</button>
               <small><Star size={11} /> {entry.rating.toFixed(1)} · {entry.downloads} download · {entry.documents} materiali · {Math.round(entry.flashcardQuality)}% flashcard utili</small>
             </div>
             <em>{entry.score} pt</em>
@@ -1213,17 +1298,17 @@ function UploaderLeaderboard({ documents, onOpenProfile }: { documents: Document
 }
 
 function PublicProfilePage({
-  uploaderName,
+  profile,
   documents,
   onRoute,
   onOpenDocument,
 }: {
-  uploaderName: string | null
+  profile: PublicProfileRef | null
   documents: DocumentItem[]
   onRoute: (route: Route) => void
   onOpenDocument: (document: DocumentItem) => void
 }) {
-  if (!uploaderName) {
+  if (!profile) {
     return (
       <main className="profile-page section-wrap">
         <section className="document-missing">
@@ -1235,9 +1320,14 @@ function PublicProfilePage({
     )
   }
 
-  const authored = documents.filter((document) => document.uploader === uploaderName)
-  const entry = buildUploaderRanking(documents).find((item) => item.name === uploaderName)
-  const rank = buildUploaderRanking(documents).findIndex((item) => item.name === uploaderName) + 1
+  const uploaderName = profile.name
+  const authored = documents.filter((document) =>
+    profile.sellerId ? document.sellerId === profile.sellerId : !document.sellerId && document.uploader === uploaderName,
+  )
+  const entry = buildUploaderRanking(documents).find((item) =>
+    profile.sellerId ? item.sellerId === profile.sellerId : !item.sellerId && item.name === uploaderName,
+  )
+  const rank = buildUploaderRanking(documents).findIndex((item) => item.id === entry?.id) + 1
   const initials = uploaderName.split(' ').slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'UD'
   const bio = `Autore della community UnimiDoc per Scienze Biologiche L-13 alla Statale di Milano. Condivide ${authored.length} material${authored.length === 1 ? 'e' : 'i'} verificati su ${new Set(authored.map((d) => d.subject)).size} materie.`
 
@@ -1303,7 +1393,7 @@ function DocumentPage({
   onPreview: (document: DocumentItem) => void
   onRoute: (route: Route) => void
   onOpenDocument: (document: DocumentItem) => void
-  onOpenProfile: (name: string) => void
+  onOpenProfile: (name: string, sellerId?: string) => void
 }) {
   if (!doc) {
     return (
@@ -1321,7 +1411,7 @@ function DocumentPage({
 
   const course = findCourse(doc.subject)
   const related = documents.filter((item) => item.subject === doc.subject && item.id !== doc.id).slice(0, 3)
-  const price = documentCreditPrice(doc)
+  const price = effectiveDocumentPrice(doc)
   const insights = doc.insights
   const courseMeta = documentCourseMeta(doc)
   const contentFeatures = insights
@@ -1357,9 +1447,9 @@ function DocumentPage({
           </p>
           <div className="document-badges">
             {doc.verified ? <span className="document-badge verified"><ShieldCheck size={14} /> Verificato</span> : null}
-            <span className="document-badge"><Star size={14} /> {doc.quality.toFixed(1)}/10</span>
+            {doc.quality > 0 ? <span className="document-badge"><Star size={14} /> {doc.quality.toFixed(1)}/10</span> : null}
             {doc.flashcardQualityPercent ? <span className="document-badge"><BrainCircuit size={14} /> Flashcard utili {doc.flashcardQualityPercent}%</span> : null}
-            <span className="document-badge"><Download size={14} /> {doc.downloads} download</span>
+            {doc.downloads > 0 ? <span className="document-badge"><Download size={14} /> {doc.downloads} download</span> : null}
             <span className="document-badge"><FileText size={14} /> {doc.pages} pagine</span>
           </div>
           <p className="document-description">{doc.description}</p>
@@ -1372,17 +1462,27 @@ function DocumentPage({
             </button>
           </div>
           <p className="document-price-hint">
-            {price} crediti ≈ €{creditsToEur(price).toFixed(2)} · l’autore riceve €{revenueSplit(price).sellerEur.toFixed(2)}
+            {price} crediti ≈ €{creditsToEur(price).toFixed(2)} · la quota autore dipende dall’origine dei crediti ed è registrata nel ledger
           </p>
         </div>
         <aside className="document-uploader-card">
-          <span className="document-uploader-avatar">{doc.uploader.slice(0, 2).toUpperCase()}</span>
-          <button className="document-uploader-name" onClick={() => onOpenProfile(doc.uploader)} type="button">{doc.uploader}</button>
-          <small>Affidabilità {doc.uploaderTrust}%</small>
-          <p>Autore verificato della community UnimiDoc per Scienze Biologiche.</p>
-          <button className="document-uploader-link" onClick={() => onOpenProfile(doc.uploader)} type="button">
-            Vedi profilo e materiali <ChevronRight size={13} />
-          </button>
+          <span className="document-uploader-avatar">{doc.sellerPublic === false ? 'UD' : doc.uploader.slice(0, 2).toUpperCase()}</span>
+          {doc.sellerPublic === false ? (
+            <>
+              <strong className="document-uploader-name">Profilo venditore privato</strong>
+              <small>Identità non pubblica</small>
+              <p>Il materiale resta acquistabile, ma l’autore non ha attivato un profilo pubblico.</p>
+            </>
+          ) : (
+            <>
+              <button className="document-uploader-name" onClick={() => onOpenProfile(doc.uploader, doc.sellerId)} type="button">{doc.uploader}</button>
+              <small>Affidabilità {doc.uploaderTrust}%</small>
+              <p>Autore verificato della community UnimiDoc per Scienze Biologiche.</p>
+              <button className="document-uploader-link" onClick={() => onOpenProfile(doc.uploader, doc.sellerId)} type="button">
+                Vedi profilo e materiali <ChevronRight size={13} />
+              </button>
+            </>
+          )}
         </aside>
       </section>
 
@@ -1492,7 +1592,7 @@ function AppHome({
   onDownload: (document: DocumentItem) => void
   onPreview: (document: DocumentItem) => void
   onOpenDocument: (document: DocumentItem) => void
-  onOpenProfile: (name: string) => void
+  onOpenProfile: (name: string, sellerId?: string) => void
   initialSubject: string
   initialQuery: string
 }) {
@@ -1659,9 +1759,9 @@ function AppHome({
       </section>
 
       <section className="trust-strip section-wrap">
-        <span><ShieldCheck size={24} /> Contenuti verificati</span>
-        <span><Star size={24} /> 4.7/5 qualità media</span>
-        <span><User size={24} /> Oltre 18.000 studenti</span>
+        <span><ShieldCheck size={24} /> Revisione e segnalazioni</span>
+        <span><Star size={24} /> Qualità flashcard misurata</span>
+        <span><User size={24} /> Profili pubblici solo su consenso</span>
       </section>
 
       <section className="browse-layout section-wrap">
@@ -1715,14 +1815,29 @@ function AppHome({
             </button>
           </section>
           <section className="credits-panel">
-            <div>
-              <span>I tuoi crediti</span>
-              <strong><CreditIcon size="lg" /> {credits}</strong>
-            </div>
-            <button onClick={() => onRoute('upload')} type="button">
-              Ottieni più crediti
-              <ArrowRight size={16} />
-            </button>
+            {isLoggedIn ? (
+              <>
+                <div>
+                  <span>I tuoi crediti</span>
+                  <strong><CreditIcon size="lg" /> {credits}</strong>
+                </div>
+                <button onClick={() => onRoute('upload')} type="button">
+                  Ottieni più crediti
+                  <ArrowRight size={16} />
+                </button>
+              </>
+            ) : (
+              <>
+                <div>
+                  <span>Saldo crediti</span>
+                  <strong>Accedi per visualizzarlo</strong>
+                </div>
+                <button onClick={() => onAuth('login')} type="button">
+                  Accedi
+                  <ArrowRight size={16} />
+                </button>
+              </>
+            )}
           </section>
         </aside>
       </section>
@@ -1783,7 +1898,7 @@ function PreviewModal({
           <div>
             <span className="preview-kicker"><Lock size={15} /> Anteprima protetta</span>
             <h2>{document.title.replace(' - Appunti completi', '').replace(' generale - Domande frequenti', '')}</h2>
-            <p>{course?.shortName ?? document.subject} · {document.pages} pagine · {documentCreditPrice(document)} crediti · {tierLabel(creditTier(documentCreditPrice(document)))}</p>
+            <p>{course?.shortName ?? document.subject} · {document.pages} pagine · {effectiveDocumentPrice(document)} crediti · {tierLabel(creditTier(effectiveDocumentPrice(document)))}</p>
           </div>
           <button className="icon-button" onClick={onClose} type="button" aria-label="Chiudi">
             <X size={18} />
@@ -1972,7 +2087,10 @@ function LoginPage({
         </button>
         <p className="auth-note">
           UnimiDoc è una piattaforma indipendente e non è affiliata all’Università degli Studi di Milano.
-          Rispettiamo la tua privacy.
+          {' '}Creando un account accetti i{' '}
+          <button className="auth-inline-link" onClick={() => onRoute('terms')} type="button">Termini</button>
+          {' '}e dichiari di avere letto l’
+          <button className="auth-inline-link" onClick={() => onRoute('privacy')} type="button">informativa privacy</button>.
         </p>
       </section>
     </main>
@@ -1994,7 +2112,17 @@ const PREMIUM_FEATURES = [
   { icon: Zap, title: 'Download senza attese', body: 'Zero code, zero pubblicità: vai dritto a studiare.' },
 ]
 
-function PremiumPage({ onRoute }: { onRoute: (route: Route) => void }) {
+function PremiumPage({
+  user,
+  onRoute,
+  onLogin,
+  onBillingUpdated,
+}: {
+  user: AppAuthUser | null
+  onRoute: (route: Route) => void
+  onLogin: () => void
+  onBillingUpdated: () => void
+}) {
   return (
     <main className="premium-page section-wrap">
       <section className="premium-hero">
@@ -2006,10 +2134,10 @@ function PremiumPage({ onRoute }: { onRoute: (route: Route) => void }) {
             ripasso. Meno caos, meno tempo perso, più voti.
           </p>
           <div className="premium-hero-actions">
-            <button className="premium-button" type="button"><Crown size={18} /> Provalo gratis 7 giorni</button>
+            <button className="premium-button" onClick={() => document.getElementById('piani-e-crediti')?.scrollIntoView({ behavior: 'smooth' })} type="button"><Crown size={18} /> Vedi piani e crediti</button>
             <button className="secondary-action" onClick={() => onRoute('app')} type="button"><Search size={17} /> Esplora appunti</button>
           </div>
-          <small className="premium-hero-note">Nessun rinnovo automatico nascosto · disdici quando vuoi</small>
+          <small className="premium-hero-note">Checkout hosted, accredito via webhook firmato e disdetta dal portale cliente quando l’ambiente è completamente configurato.</small>
         </div>
         <img src={premiumStack} alt="Premium UnimiDoc" />
       </section>
@@ -2043,45 +2171,25 @@ function PremiumPage({ onRoute }: { onRoute: (route: Route) => void }) {
         </div>
       </section>
 
-      <section className="premium-credits">
+      <section className="premium-credits" id="piani-e-crediti" style={{ scrollMarginTop: '90px' }}>
         <div className="premium-section-head">
           <h2>Abbonamento o crediti? Come preferisci.</h2>
-          <p>L’abbonamento Premium sblocca gli strumenti di studio. I crediti servono a sbloccare i singoli materiali: compri solo quello che ti serve.</p>
+          <p>Premium sblocca gli strumenti di studio; i crediti servono per i singoli materiali. Stato, prezzi e disponibilità sono verificati dal server.</p>
         </div>
-        <div className="premium-plan-grid">
-          <article className="premium-plan highlight">
-            <span className="premium-plan-tag"><Crown size={14} /> Premium</span>
-            <strong className="premium-plan-price">€4,99<span>/mese</span></strong>
-            <ul>
-              <li><Check size={15} /> Anteprime complete</li>
-              <li><Check size={15} /> Flashcard, quiz e image occlusion</li>
-              <li><Check size={15} /> Ricerca avanzata + download senza attese</li>
-              <li><Check size={15} /> 7 giorni gratis</li>
-            </ul>
-            <button className="premium-button" type="button"><Crown size={17} /> Inizia gratis</button>
-          </article>
-          <article className="premium-plan">
-            <span className="premium-plan-tag"><Wallet size={14} /> Crediti</span>
-            <strong className="premium-plan-price">da €5</strong>
-            <p className="premium-plan-note">Più ricarichi, più bonus. 1 credito = €0,10.</p>
-            <ul className="premium-pack-list">
-              {TOPUP_PACKS.map((pack) => (
-                <li key={pack.id}>
-                  <span>€{pack.priceEur}</span>
-                  <strong>{pack.credits} crediti</strong>
-                  {pack.bonusPct > 0 ? <em>+{pack.bonusPct}%</em> : <em>base</em>}
-                </li>
-              ))}
-            </ul>
-            <button className="secondary-action" onClick={() => onRoute('app')} type="button"><Wallet size={17} /> Sfoglia i materiali</button>
-          </article>
-        </div>
+        <Suspense fallback={<div className="billing-runtime-state"><Loader2 className="spin" size={17} /> Carico offerte e stato pagamenti…</div>}>
+          <BillingPlans
+            user={user}
+            onBillingUpdated={onBillingUpdated}
+            onLegal={(legalRoute) => onRoute(legalRoute)}
+            onLogin={onLogin}
+          />
+        </Suspense>
       </section>
 
       <section className="premium-trust">
         <span><TrendingUp size={22} /> Autori premiati per qualità e vendite</span>
-        <span><Star size={22} /> 4.7/5 qualità media dei materiali</span>
-        <span><ShieldCheck size={22} /> Contenuti verificati dalla community</span>
+        <span><Star size={22} /> Qualità misurata da valutazioni reali</span>
+        <span><ShieldCheck size={22} /> Contenuti sottoposti a revisione</span>
       </section>
 
       <section className="final-cta">
@@ -2146,6 +2254,16 @@ const flashcardSourceLabels: Record<Flashcard['source'], string> = {
   confronto: 'Confronto',
   causa: 'Causa-effetto',
   classificazione: 'Classificazione',
+}
+
+const backendFlashcardType: Record<Flashcard['source'], NonNullable<PremiumGeneratedFlashcard['type']>> = {
+  definizione: 'definition',
+  concetto: 'qa',
+  cloze: 'cloze',
+  processo: 'reasoning',
+  confronto: 'comparison',
+  causa: 'reasoning',
+  classificazione: 'definition',
 }
 
 type PremiumFlashcardChunk = {
@@ -2377,6 +2495,15 @@ function saveSrsMap(key: string, map: Record<string, SrsState>): void {
     window.localStorage.setItem(SRS_STORAGE_PREFIX + key, JSON.stringify(map))
   } catch {
     /* storage unavailable or full — non-fatal for study flow */
+  }
+}
+
+function discardSrsMap(key: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(SRS_STORAGE_PREFIX + key)
+  } catch {
+    /* Best effort privacy cleanup for the former browser-wide key. */
   }
 }
 
@@ -2713,20 +2840,43 @@ function FlashcardStudyModal({
   const [answerStatus, setAnswerStatus] = useState<AnswerStatus>('unanswered')
   const [selectedChoice, setSelectedChoice] = useState('')
   const [responseLog, setResponseLog] = useState<Record<string, AnswerStatus>>({})
-  const storageKey = `${hashString(title)}-${cards.length}`
+  const progressUserId = user?.id ?? 'guest'
+  const legacyStorageKey = `${hashString(title)}-${cards.length}`
+  const storageKey = `${progressUserId}:${documentId ?? hashString(title)}:${cards.length}`
   const [srsByCard, setSrsByCard] = useState<Record<string, SrsState>>(() => loadSrsMap(storageKey))
   const [favoriteByCard, setFavoriteByCard] = useState<Record<string, boolean>>({})
   const [qualityVoteByCard, setQualityVoteByCard] = useState<Record<string, FlashcardQualityVote>>({})
   const [aiHelpMessage, setAiHelpMessage] = useState('')
   const [aiHelpLoading, setAiHelpLoading] = useState(false)
   const readerRef = useRef<HTMLDivElement>(null)
-  const progressUserId = user?.id ?? 'guest'
+  const remoteOutcomeByCard = useRef<Record<string, Promise<boolean>>>({})
 
   useBodyScrollLock()
 
   useEffect(() => {
+    // v1 used only title+count and leaked schedules across accounts/documents.
+    discardSrsMap(legacyStorageKey)
     setSrsByCard(loadSrsMap(storageKey))
-  }, [storageKey])
+  }, [legacyStorageKey, storageKey])
+
+  useEffect(() => {
+    let active = true
+    const persistedIds = cards.map((card) => card.id).filter(isPersistedFlashcardId)
+    if (persistedIds.length === 0) return () => {
+      active = false
+    }
+    void loadRemoteFlashcardSrs(persistedIds).then((remote) => {
+      if (!active || Object.keys(remote).length === 0) return
+      setSrsByCard((local) => {
+        const merged = { ...local, ...remote }
+        saveSrsMap(storageKey, merged)
+        return merged
+      })
+    })
+    return () => {
+      active = false
+    }
+  }, [cards, storageKey])
 
   const safeIndex = Math.min(index, Math.max(0, cards.length - 1))
   const current = cards[safeIndex]
@@ -2816,6 +2966,11 @@ function FlashcardStudyModal({
     node.querySelector<HTMLElement>(`[data-sent="${current.ref.sentenceIndex}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }
 
+  const queueRemoteOutcome = (status: AnswerStatus) => {
+    if (!isPersistedFlashcardId(current.id)) return
+    remoteOutcomeByCard.current[current.id] = recordRemoteFlashcardOutcome(current.id, status)
+  }
+
   const submitTextAnswer = () => {
     const status = evaluateTextAnswer(userAnswer, current.back)
     if (status === 'unanswered') return
@@ -2823,7 +2978,7 @@ function FlashcardStudyModal({
     setRevealed(true)
     setResponseLog((currentLog) => ({ ...currentLog, [current.id]: status }))
     recordLocalFlashcardOutcome(progressUserId, current, studyContext, status)
-    if (isPersistedFlashcardId(current.id)) void recordRemoteFlashcardOutcome(current.id, status)
+    queueRemoteOutcome(status)
   }
 
   const markUnknown = () => {
@@ -2831,7 +2986,7 @@ function FlashcardStudyModal({
     setRevealed(true)
     setResponseLog((currentLog) => ({ ...currentLog, [current.id]: 'unknown' }))
     recordLocalFlashcardOutcome(progressUserId, current, studyContext, 'incorrect')
-    if (isPersistedFlashcardId(current.id)) void recordRemoteFlashcardOutcome(current.id, 'incorrect')
+    queueRemoteOutcome('incorrect')
   }
 
   const chooseOption = (option: string) => {
@@ -2841,7 +2996,7 @@ function FlashcardStudyModal({
     setRevealed(true)
     setResponseLog((currentLog) => ({ ...currentLog, [current.id]: status }))
     recordLocalFlashcardOutcome(progressUserId, current, studyContext, status)
-    if (isPersistedFlashcardId(current.id)) void recordRemoteFlashcardOutcome(current.id, status)
+    queueRemoteOutcome(status)
   }
 
   const chooseTrueFalse = (value: boolean) => {
@@ -2851,10 +3006,10 @@ function FlashcardStudyModal({
     setRevealed(true)
     setResponseLog((currentLog) => ({ ...currentLog, [current.id]: status }))
     recordLocalFlashcardOutcome(progressUserId, current, studyContext, status)
-    if (isPersistedFlashcardId(current.id)) void recordRemoteFlashcardOutcome(current.id, status)
+    queueRemoteOutcome(status)
   }
 
-  const rateSrs = (rating: SrsRating) => {
+  const rateSrs = async (rating: SrsRating) => {
     const effectiveStatus = answerStatus === 'unanswered' ? (revealed ? 'correct' : 'skipped') : answerStatus
     const next = calculateNextReview({
       currentState: currentSrs,
@@ -2869,25 +3024,42 @@ function FlashcardStudyModal({
     if (answerStatus === 'unanswered') {
       recordLocalFlashcardOutcome(progressUserId, current, studyContext, effectiveStatus, next)
     } else {
-      updateLocalFlashcardSchedule(progressUserId, current.id, next)
+      updateLocalFlashcardSchedule(progressUserId, flashcardProgressId(current, studyContext), next)
     }
     if (isPersistedFlashcardId(current.id)) {
-      void submitSrsReview({
+      // Serialize the immediate answer rollup with SRS scheduling. If that
+      // first write failed or never ran, srs-review performs the rollup itself
+      // with the authoritative due date instead of updating a missing row.
+      const progressAlreadyRecorded = await (remoteOutcomeByCard.current[current.id] ?? Promise.resolve(false))
+      const remote = await submitSrsReview({
         flashcardId: current.id,
         rating,
         answerStatus: effectiveStatus,
         questionType: current.source,
         userAnswer: userAnswer || selectedChoice || undefined,
         correctAnswer: current.back,
-        recordProgress: answerStatus === 'unanswered',
+        recordProgress: !progressAlreadyRecorded,
       })
+      if (remote.ok) {
+        const authoritative = remote.data.srs
+        setSrsByCard((state) => {
+          const updated = { ...state, [current.id]: authoritative }
+          saveSrsMap(storageKey, updated)
+          return updated
+        })
+        updateLocalFlashcardSchedule(
+          progressUserId,
+          flashcardProgressId(current, studyContext),
+          authoritative,
+        )
+      }
     }
   }
 
   const toggleFavorite = () => {
     const next = !favoriteByCard[current.id]
     setFavoriteByCard((state) => ({ ...state, [current.id]: next }))
-    setLocalFlashcardFavorite(progressUserId, current.id, next)
+    setLocalFlashcardFavorite(progressUserId, flashcardProgressId(current, studyContext), next)
     if (isPersistedFlashcardId(current.id)) void setRemoteFlashcardFavorite(current.id, next)
   }
 
@@ -2912,6 +3084,7 @@ function FlashcardStudyModal({
       answerStatus: answerStatus === 'unanswered' ? undefined : answerStatus,
       sourceText: sourceContext,
       flashcardId: current.id,
+      documentId: documentId ?? undefined,
       language: 'it',
     })
     setAiHelpLoading(false)
@@ -3142,7 +3315,7 @@ function FlashcardStudyModal({
                 <span>Ripetizione spaziata{nextDueLabel ? ` · prossima tra ${nextDueLabel}` : ''}</span>
                 <div>
                   {(Object.keys(srsRatingLabels) as SrsRating[]).map((rating) => (
-                    <button key={rating} onClick={() => rateSrs(rating)} type="button">
+                    <button key={rating} onClick={() => void rateSrs(rating)} type="button">
                       {srsRatingLabels[rating]}
                     </button>
                   ))}
@@ -3830,21 +4003,13 @@ function FreeStudyToolsPanel({
     return true
   }
 
-  const visiblePages = useMemo(
-    () =>
-      pages
-        .map(([page, pageSentences]) => [page, pageSentences.filter(sentenceMatchesView)] as [number, DocSentence[]])
-        .filter(([, pageSentences]) => pageSentences.length > 0),
-    [bookmarkedPageSet, pages, readerState.highlights, view],
-  )
+  const visiblePages = pages
+    .map(([page, pageSentences]) => [page, pageSentences.filter(sentenceMatchesView)] as [number, DocSentence[]])
+    .filter(([, pageSentences]) => pageSentences.length > 0)
 
-  const searchMatches = useMemo(
-    () =>
-      normalizedQuery
-        ? sentences.filter((sentence) => sentenceMatchesView(sentence) && normalizeSearchValue(sentence.text).includes(normalizedQuery))
-        : [],
-    [bookmarkedPageSet, normalizedQuery, readerState.highlights, sentences, view],
-  )
+  const searchMatches = normalizedQuery
+    ? sentences.filter((sentence) => sentenceMatchesView(sentence) && normalizeSearchValue(sentence.text).includes(normalizedQuery))
+    : []
 
   const activeMatch = searchMatches[activeMatchIndex] ?? null
 
@@ -4022,16 +4187,14 @@ function FreeStudyToolsPanel({
       </div>
 
       <div className="free-reader-view-tabs" aria-label="Filtro reader">
-        {(
-          [
-            ['all', 'Tutto', <BookOpen size={15} />],
-            ['highlights', 'Evidenziati', <Highlighter size={15} />],
-            ['review', 'Ripasso', <ListChecks size={15} />],
-            ['bookmarks', 'Segnalibri', <Bookmark size={15} />],
-          ] as [FreeReaderView, string, React.ReactNode][]
-        ).map(([key, label, icon]) => (
+        {[
+          { key: 'all' as const, label: 'Tutto', Icon: BookOpen },
+          { key: 'highlights' as const, label: 'Evidenziati', Icon: Highlighter },
+          { key: 'review' as const, label: 'Ripasso', Icon: ListChecks },
+          { key: 'bookmarks' as const, label: 'Segnalibri', Icon: Bookmark },
+        ].map(({ key, label, Icon }) => (
           <button className={view === key ? 'active' : ''} onClick={() => setView(key)} type="button" key={key}>
-            {icon}
+            <Icon size={15} />
             {label}
           </button>
         ))}
@@ -4313,10 +4476,17 @@ function makeDraftAnalysis(analysis: PdfAnalysis): PdfAnalysis {
   }
 }
 
-function loadUploadReaderDraft(): UploadReaderDraft | null {
+function uploadDraftStorageKey(ownerId: string): string {
+  return `${UPLOAD_READER_DRAFT_KEY}:${ownerId}`
+}
+
+function loadUploadReaderDraft(ownerId: string): UploadReaderDraft | null {
   if (typeof window === 'undefined') return null
   try {
-    const raw = window.localStorage.getItem(UPLOAD_READER_DRAFT_KEY)
+    // v1 originally used one browser-wide key and could expose OCR text after
+    // an account switch. Do not migrate that ambiguous draft to any user.
+    window.localStorage.removeItem(UPLOAD_READER_DRAFT_KEY)
+    const raw = window.localStorage.getItem(uploadDraftStorageKey(ownerId))
     if (!raw) return null
     const parsed = JSON.parse(raw) as UploadReaderDraft
     if (parsed.version !== 1 || !parsed.analysis?.sentences?.length) return null
@@ -4331,21 +4501,7 @@ async function sha256HexOfBytes(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-// Ricostruisce il testo per pagina dalle sentence già estratte (pdfjs + OCR):
-// è il payload che rag-index valida e persiste in pdf_pages lato server.
-function pageTextsFromAnalysis(info: PdfAnalysis): Array<{ pageNumber: number; text: string }> {
-  const byPage = new Map<number, string[]>()
-  for (const sentence of info.sentences) {
-    const list = byPage.get(sentence.page)
-    if (list) list.push(sentence.text)
-    else byPage.set(sentence.page, [sentence.text])
-  }
-  return [...byPage.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([pageNumber, texts]) => ({ pageNumber, text: texts.join('\n') }))
-}
-
-function saveUploadReaderDraft(title: string, analysis: PdfAnalysis): void {
+function saveUploadReaderDraft(ownerId: string, title: string, analysis: PdfAnalysis): void {
   if (typeof window === 'undefined') return
   try {
     const draft: UploadReaderDraft = {
@@ -4354,16 +4510,16 @@ function saveUploadReaderDraft(title: string, analysis: PdfAnalysis): void {
       analysis: makeDraftAnalysis(analysis),
       savedAt: new Date().toISOString(),
     }
-    window.localStorage.setItem(UPLOAD_READER_DRAFT_KEY, JSON.stringify(draft))
+    window.localStorage.setItem(uploadDraftStorageKey(ownerId), JSON.stringify(draft))
   } catch {
     /* A long document can exceed localStorage. The active reader still works. */
   }
 }
 
-function clearUploadReaderDraft(): void {
+function clearUploadReaderDraft(ownerId: string): void {
   if (typeof window === 'undefined') return
   try {
-    window.localStorage.removeItem(UPLOAD_READER_DRAFT_KEY)
+    window.localStorage.removeItem(uploadDraftStorageKey(ownerId))
   } catch {
     /* Best effort only. */
   }
@@ -4394,7 +4550,9 @@ function UploadPage({
   onPublish: (document: DocumentItem) => number
   user: AppAuthUser | null
 }) {
-  const [restoredDraft, setRestoredDraft] = useState<UploadReaderDraft | null>(() => loadUploadReaderDraft())
+  const remoteUploadEnabled = import.meta.env.VITE_DOCUMENT_UPLOAD_ENABLED === 'true'
+  const draftOwnerId = user?.id ?? 'anonymous'
+  const [restoredDraft, setRestoredDraft] = useState<UploadReaderDraft | null>(() => loadUploadReaderDraft(draftOwnerId))
   const [file, setFile] = useState<File | null>(null)
   const [dragging, setDragging] = useState(false)
   const [phase, setPhase] = useState<UploadPhase>(() => (restoredDraft ? 'ready' : 'idle'))
@@ -4425,7 +4583,9 @@ function UploadPage({
   // Byte del PDF finale (post conversione Word e post compressione): sono i
   // byte realmente caricati su Storage — il PDF non entra mai nel database.
   const pdfBytesRef = useRef<Uint8Array | null>(null)
-  const [cloudState, setCloudState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
+  const [cloudState, setCloudState] = useState<'idle' | 'saving' | 'queued' | 'saved' | 'failed'>('idle')
+  const [indexState, setIndexState] = useState<'idle' | 'queued' | 'indexing' | 'indexed' | 'failed'>('idle')
+  const [deckState, setDeckState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   const [cards, setCards] = useState<Flashcard[]>([])
   const [reviewCardIndex, setReviewCardIndex] = useState(0)
   const [approvedCardIds, setApprovedCardIds] = useState<Set<string>>(() => new Set())
@@ -4490,7 +4650,7 @@ function UploadPage({
     if (insights?.keywords.length && !tagsInput.trim()) {
       setTagsInput(insights.keywords.slice(0, 6).join(', '))
     }
-  }, [insights])
+  }, [insights, tagsInput])
 
   useEffect(() => {
     setReviewCardIndex((current) => Math.min(current, Math.max(0, cards.length - 1)))
@@ -4498,19 +4658,22 @@ function UploadPage({
 
   useEffect(() => {
     if (phase === 'ready' && analysis) {
-      saveUploadReaderDraft(title.trim() || file?.name || restoredDraft?.title || 'Documento caricato', analysis)
+      saveUploadReaderDraft(draftOwnerId, title.trim() || file?.name || restoredDraft?.title || 'Documento caricato', analysis)
     }
-  }, [analysis, file?.name, phase, restoredDraft?.title, title])
+  }, [analysis, draftOwnerId, file?.name, phase, restoredDraft?.title, title])
 
   const patchStep = (key: PipelineStepKey, patch: Partial<PipelineStep>) =>
     setSteps((current) => current.map((step) => (step.key === key ? { ...step, ...patch } : step)))
 
   const resetAll = () => {
-    clearUploadReaderDraft()
+    clearUploadReaderDraft(draftOwnerId)
     setRestoredDraft(null)
     setFile(null)
     setPhase('idle')
     setError('')
+    setCloudState('idle')
+    setIndexState('idle')
+    setDeckState('idle')
     setSteps([])
     setAnalysis(null)
     setInsights(null)
@@ -4537,7 +4700,7 @@ function UploadPage({
   }
 
   const runPipeline = async (picked: File) => {
-    clearUploadReaderDraft()
+    clearUploadReaderDraft(draftOwnerId)
     setRestoredDraft(null)
     setPhase('processing')
     setError('')
@@ -4606,7 +4769,7 @@ function UploadPage({
       // contenuto e livello estratti dal testo reale (nessun costo AI).
       setInsights(buildDocumentInsights(info))
       const inferredTitle = title || picked.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim()
-      saveUploadReaderDraft(inferredTitle || 'Documento caricato', info)
+      saveUploadReaderDraft(draftOwnerId, inferredTitle || 'Documento caricato', info)
       patchStep('read', {
         status: 'done',
         detail: word ? `Convertito · ${info.pageCount} pagine` : `${info.pageCount} pagine · ${formatBytes(picked.size)}`,
@@ -4692,7 +4855,7 @@ function UploadPage({
           })
           setAnalysis(info)
           setInsights(buildDocumentInsights(info))
-          saveUploadReaderDraft(inferredTitle || 'Documento caricato', info)
+          saveUploadReaderDraft(draftOwnerId, inferredTitle || 'Documento caricato', info)
           patchStep('finalize', { status: 'running', detail: refined.data.cached ? 'Indice Premium recuperato da cache' : 'Indice Premium rifinito' })
         } else {
           patchStep('finalize', { status: 'running', detail: 'Indice gratuito mantenuto' })
@@ -4881,14 +5044,30 @@ function UploadPage({
       return next
     })
   }
-  const canPublish = phase === 'ready' && Boolean(file) && Boolean(title.trim()) && Boolean(subject) && Boolean(professor.trim()) && rights
+  const canPublish = phase === 'ready'
+    && cloudState !== 'saving'
+    && Boolean(file)
+    && Boolean(title.trim())
+    && Boolean(subject)
+    && Boolean(professor.trim())
+    && rights
+    && (user?.isDemo === true || remoteUploadEnabled)
+  const uploadPriceCredits = Math.max(
+    MIN_DOCUMENT_PRICE,
+    Math.min(14, Math.round((analysis?.pageCount ?? 0) / 12) + (premium ? 4 : 2)),
+  )
 
   // Upload reale su Supabase: documento (draft privato) → PDF su Storage via
-  // signed URL → testo pagine a rag-index, che lo valida, salva pdf_pages,
-  // ricostruisce i chunk e genera gli embedding. Il PDF resta SOLO in Storage;
-  // nel database vanno solo chunk, metadati ed embedding. Best-effort: se
-  // fallisce (offline/demo), il flusso locale continua comunque.
-  const publishToBackend = async (): Promise<{ ok: boolean; message?: string }> => {
+  // signed URL → finalize leggero → verifica autorevole nel worker nativo
+  // (dimensione, hash, magic bytes e qpdf). L'indicizzazione RAG usa soltanto
+  // gli artefatti attivi prodotti dal run completato.
+  const publishToBackend = async (): Promise<{
+    ok: boolean
+    documentId?: string
+    verified?: boolean
+    verificationQueued?: boolean
+    message?: string
+  }> => {
     if (!user || user.isDemo || !isSupabaseConfigured || !supabase) return { ok: false, message: 'non_configurato' }
     const bytes = pdfBytesRef.current
     if (!bytes || !analysis) return { ok: false, message: 'byte PDF non disponibili (ricarica il file)' }
@@ -4908,6 +5087,7 @@ function UploadPage({
       examType,
       semester: semester || undefined,
       tags: tagsInput.split(',').map((tag) => tag.trim()).filter(Boolean).slice(0, 10),
+      priceCredits: uploadPriceCredits,
     })
     if (!created.ok) return { ok: false, message: created.message }
 
@@ -4915,18 +5095,41 @@ function UploadPage({
     const { error: uploadError } = await supabase.storage
       .from(created.data.storageBucket)
       .uploadToSignedUrl(uploadPath, created.data.token ?? '', bytes.slice().buffer, { contentType: 'application/pdf' })
-    if (uploadError) return { ok: false, message: `upload Storage: ${uploadError.message}` }
+    if (uploadError) {
+      await cancelDocumentUpload(created.data.documentId)
+      return { ok: false, message: `upload Storage: ${uploadError.message}` }
+    }
 
-    const indexed = await ragIndexDocument({
+    let finalized = await finalizeDocumentUpload({
       documentId: created.data.documentId,
-      force: true,
-      pages: pageTextsFromAnalysis(analysis),
+      pageCount: analysis.pageCount,
+      language: insights?.language ?? 'it',
     })
-    if (!indexed.ok) return { ok: false, message: `indicizzazione: ${indexed.message}` }
-    return { ok: true }
+    // A lost HTTP response can happen after the server committed. Finalize is
+    // idempotent, so reconcile once before reporting failure; never delete the
+    // draft here because it may already be submitted successfully.
+    if (!finalized.ok) {
+      finalized = await finalizeDocumentUpload({
+        documentId: created.data.documentId,
+        pageCount: analysis.pageCount,
+        language: insights?.language ?? 'it',
+      })
+    }
+    if (!finalized.ok) {
+      return {
+        ok: false,
+        message: `verifica upload non confermata: ${finalized.message}. La bozza è stata conservata per un nuovo tentativo`,
+      }
+    }
+    return {
+      ok: true,
+      documentId: finalized.data.documentId,
+      verified: finalized.data.verified,
+      verificationQueued: finalized.data.verificationQueued,
+    }
   }
 
-  const publish = () => {
+  const publish = async () => {
     if (!file) return
     if (!title.trim()) return setError('Aggiungi un titolo al documento.')
     if (!professor.trim()) return setError('Indica il docente.')
@@ -4939,7 +5142,7 @@ function UploadPage({
 
     const sizeBytes = compression ? compression.compressedBytes : file.size
     const pages = analysis?.pageCount ?? 0
-    const cost = Math.max(4, Math.min(14, Math.round(pages / 12) + (premium ? 4 : 2)))
+    const cost = uploadPriceCredits
 
     const document: DocumentItem = {
       id: `up-${Date.now()}`,
@@ -4991,20 +5194,49 @@ function UploadPage({
         .slice(0, 10),
     }
 
+    const isLiveUpload = Boolean(user && !user.isDemo && isSupabaseConfigured && supabase)
+    if (isLiveUpload) {
+      setCloudState('saving')
+      const result = await publishToBackend()
+      if (!result.ok || !result.documentId) {
+        setCloudState('failed')
+        setError(`Invio non completato: ${result.message ?? 'salvataggio cloud non riuscito'}. Il documento non è stato pubblicato.`)
+        return
+      }
+      document.id = result.documentId
+      setCloudState(result.verified ? 'saved' : 'queued')
+    }
+
     const awarded = onPublish(document)
     setEarned(awarded)
     setPhase('published')
     window.scrollTo({ left: 0, top: 0, behavior: 'smooth' })
 
-    // Salvataggio cloud in parallelo alla conferma locale: PDF su Storage,
-    // testo+embedding nel DB. Lo stato è mostrato nel pannello post-publish.
-    setCloudState('saving')
-    void publishToBackend().then((result) => {
-      setCloudState(result.ok ? 'saved' : 'failed')
-      if (!result.ok && result.message && result.message !== 'non_configurato') {
-        console.warn('Salvataggio cloud non riuscito:', result.message)
+    if (isLiveUpload) {
+      // The durable DB trigger creates the RAG job only after quality_review.
+      // Do not race it from the browser while extraction/OCR is still queued.
+      setIndexState('queued')
+      const reviewedCards = includedCards.filter((card) => approvedCardIds.has(card.id))
+      if (reviewedCards.length > 0) {
+        setDeckState('saving')
+        void saveReviewedFlashcards({
+          documentId: document.id,
+          cards: reviewedCards.map((card) => ({
+            type: backendFlashcardType[card.source],
+            question: card.front,
+            answer: card.back,
+            cloze_text: card.source === 'cloze' ? card.front : null,
+            difficulty: card.score >= 0.93 ? 'hard' : card.score <= 0.86 ? 'easy' : 'medium',
+            source_quote: card.ref?.text,
+            page_start: card.ref?.page ?? null,
+            page_end: card.ref?.page ?? null,
+            tags: [card.source, card.ref?.section].filter((tag): tag is string => Boolean(tag)),
+          })),
+        }).then((saved) => {
+          setDeckState(saved.ok && saved.data.savedCount === reviewedCards.length ? 'saved' : 'failed')
+        })
       }
-    })
+    }
   }
 
   const compressionBadge = compression
@@ -5030,7 +5262,7 @@ function UploadPage({
     : 'Le flashcard automatiche sono riservate a Premium per mantenere deck più pertinenti e meno casuali.'
   const selectedCourseMeta = formatCourseMeta(selectedCourse)
   const freeReaderTitle = title.trim() || file?.name || 'Documento caricato'
-  const freeReaderStorageKey = analysis ? readerStorageKeyForAnalysis(analysis) : 'upload-empty'
+  const freeReaderStorageKey = `${draftOwnerId}:${analysis ? readerStorageKeyForAnalysis(analysis) : 'upload-empty'}`
 
   return (
     <main className="upload-page section-wrap">
@@ -5075,24 +5307,53 @@ function UploadPage({
       {phase === 'published' ? (
         <section className="upload-success">
           <span className="upload-success-icon"><CheckCircle2 size={30} /></span>
-          <h2>Inviato in revisione</h2>
-          <p>“{title}” è nella coda di moderazione. Ti avvisiamo appena viene pubblicato.</p>
+          <h2>{cloudState === 'queued' ? 'Caricamento ricevuto' : 'Inviato in revisione'}</h2>
+          <p>
+            {cloudState === 'queued'
+              ? `“${title}” è nello Storage privato e attende la verifica PDF automatica.`
+              : `“${title}” è nella coda di moderazione. Ti avvisiamo appena viene pubblicato.`}
+          </p>
           {cloudState !== 'idle' ? (
-            <p className={`upload-cloud-state is-${cloudState}`}>
+            <p className={`upload-cloud-state is-${cloudState === 'queued' ? 'saving' : cloudState}`}>
               {cloudState === 'saving'
-                ? 'Salvataggio cloud in corso: PDF su storage sicuro e testo indicizzato per la ricerca intelligente…'
+                ? 'Trasferimento cloud in corso: preparo il PDF nello Storage privato…'
+                : cloudState === 'queued'
+                  ? 'PDF caricato: verifica nativa, compressione ed estrazione sono accodate. La revisione inizierà solo dopo i controlli.'
                 : cloudState === 'saved'
-                  ? 'Salvato nel cloud: documento archiviato e indicizzato per la ricerca intelligente (Chiedi al documento).'
-                  : 'Salvataggio cloud non riuscito: il documento resta disponibile in locale. Riprova dal tuo account.'}
+                  ? 'Upload verificato e inviato in revisione: il PDF è archiviato nello Storage privato.'
+                  : 'Salvataggio cloud non riuscito: il documento non è stato inviato. Torna al modulo e riprova.'}
+            </p>
+          ) : null}
+          {indexState !== 'idle' ? (
+            <p className={`upload-cloud-state is-${indexState === 'indexed' ? 'saved' : indexState === 'failed' ? 'failed' : 'saving'}`}>
+              {indexState === 'queued'
+                ? 'Analisi intelligente accodata: chunk ed embedding saranno generati dopo estrazione, OCR e controllo qualità.'
+                : indexState === 'indexing'
+                ? 'Analisi intelligente in corso: preparo pagine, chunk ed embedding senza bloccare la revisione.'
+                : indexState === 'indexed'
+                  ? 'Analisi intelligente completata: il documento è pronto per retrieval e citazioni.'
+                  : 'Il PDF è salvo, ma l’analisi intelligente non è terminata. Potrà essere rilanciata dalla libreria.'}
+            </p>
+          ) : null}
+          {deckState !== 'idle' ? (
+            <p className={`upload-cloud-state is-${deckState === 'saved' ? 'saved' : deckState === 'failed' ? 'failed' : 'saving'}`}>
+              {deckState === 'saving'
+                ? 'Salvataggio delle flashcard approvate nel deck personale…'
+                : deckState === 'saved'
+                  ? 'Flashcard approvate salvate con documento, pagina, chunk e sezione.'
+                  : 'Il documento è salvo, ma alcune flashcard approvate non sono state persistite. Potrai rigenerarle dalla libreria.'}
             </p>
           ) : null}
           <div className="upload-success-stats">
-            <div><strong><CreditIcon size="lg" /> +{earned}</strong><span>crediti guadagnati</span></div>
+            <div>
+              <strong><CreditIcon size="lg" /> {earned > 0 ? `+${earned}` : 'In attesa'}</strong>
+              <span>{earned > 0 ? 'crediti demo accreditati' : 'premio dopo approvazione'}</span>
+            </div>
             <div>
               <strong>{compression ? (compression.alreadyOptimized ? '0%' : `−${compression.savedPct}%`) : '—'}</strong>
               <span>peso PDF (lossless)</span>
             </div>
-            <div><strong>{includedCards.length}</strong><span>flashcard incluse</span></div>
+            <div><strong>{approvedCount}</strong><span>flashcard approvate</span></div>
             <div><strong>{analysis ? analysis.ocrPages.length : 0}</strong><span>pagine in coda OCR</span></div>
           </div>
           <div className="upload-success-actions">
@@ -5533,10 +5794,10 @@ function UploadPage({
             materiale è mio o rielaborato in modo originale.
           </label>
 
-          <button className="primary-action upload-submit" disabled={!canPublish} onClick={publish} type="button">
-            {phase === 'processing' ? (
+          <button className="primary-action upload-submit" disabled={!canPublish} onClick={() => void publish()} type="button">
+            {cloudState === 'saving' || phase === 'processing' ? (
               <>
-                <Loader2 className="spin" size={18} /> Elaborazione in corso…
+                <Loader2 className="spin" size={18} /> {cloudState === 'saving' ? 'Verifica upload in corso…' : 'Elaborazione in corso…'}
               </>
             ) : (
               <>
@@ -5544,9 +5805,16 @@ function UploadPage({
               </>
             )}
           </button>
+          {!remoteUploadEnabled && !user?.isDemo ? (
+            <small className="upload-hint" role="status">
+              Nuovi caricamenti temporaneamente in pausa finché il worker di verifica PDF non è operativo.
+            </small>
+          ) : null}
           {phase === 'ready' && !canPublish ? (
             <small className="upload-hint">
-              {file
+              {!remoteUploadEnabled && !user?.isDemo
+                ? 'Il file resta soltanto nella bozza locale e non viene inviato.'
+                : file
                 ? 'Completa titolo, docente e dichiarazione per inviare.'
                 : 'Questa è una bozza locale: ricarica il file originale per inviare in revisione.'}
             </small>
@@ -5604,6 +5872,14 @@ function UserDashboardPage({
   const [sidePanel, setSidePanel] = useState<'notifications' | 'credits' | null>(null)
   const [flashcardDashboard, setFlashcardDashboard] = useState<FlashcardDashboardData | null>(null)
   const [flashcardFilters, setFlashcardFilters] = useState<FlashcardDashboardFilters>(EMPTY_FLASHCARD_FILTERS)
+  const [dashboardStudyDeck, setDashboardStudyDeck] = useState<{
+    title: string
+    documentId: string | null
+    author: string
+    subject: string
+    cards: Flashcard[]
+    sentences: DocSentence[]
+  } | null>(null)
 
   // Deep-link to a dashboard section via #hash (from navbar / user menu).
   useEffect(() => {
@@ -5658,16 +5934,29 @@ function UserDashboardPage({
     }
   }, [documents, user])
 
-  // Real persisted slices replace the preview only when the backend actually
-  // returned rows; otherwise the generated content keeps the dashboard alive.
+  // Empty live arrays are authoritative empty states. Falling back to fixtures
+  // for a real account would fabricate purchases, notifications and progress.
   const data = overlay
     ? {
         ...baseData,
-        creditHistory: overlay.creditHistory.length ? overlay.creditHistory : baseData.creditHistory,
-        notifications: overlay.notifications.length ? overlay.notifications : baseData.notifications,
+        creditHistory: overlay.creditHistory,
+        notifications: overlay.notifications,
+        shelves: baseData.shelves.map((shelf) => {
+          const ids = shelf.id === 'purchased'
+            ? overlay.purchasedDocumentIds
+            : shelf.id === 'saved'
+              ? overlay.savedDocumentIds
+              : shelf.id === 'later'
+                ? overlay.laterDocumentIds
+                : null
+          return ids
+            ? { ...shelf, documents: ids.map((id) => documents.find((document) => document.id === id)).filter((document): document is DocumentItem => Boolean(document)) }
+            : shelf
+        }),
       }
     : baseData
   const displayCredits = overlay?.credits ?? credits
+  const displayedWallet = wallet ?? overlay?.walletState ?? null
   const dataIsLive = Boolean(overlay)
   const flashcardDataIsLive = flashcardDashboard?.source === 'live'
   const firstName = user.name.split(' ')[0] || 'Studente'
@@ -5705,6 +5994,50 @@ function UserDashboardPage({
   const activeShelf = data.shelves.find((shelf) => shelf.id === activeShelfId)
     ?? data.shelves.find((shelf) => shelf.documents.length > 0)
     ?? data.shelves[0]
+
+  const openDashboardStudyDeck = (record: FlashcardStudyRecord) => {
+    const related = flashcardRecords.filter((candidate) =>
+      record.documentId
+        ? candidate.documentId === record.documentId
+        : candidate.documentTitle === record.documentTitle,
+    )
+    const sentences: DocSentence[] = related
+      .filter((candidate) => candidate.page && candidate.sourceQuote)
+      .map((candidate, sentenceIndex) => ({
+        index: sentenceIndex,
+        page: candidate.page!,
+        text: candidate.sourceQuote!,
+        section: candidate.section,
+        kind: 'sentence',
+      }))
+    const sourceIndexByCard = new Map(
+      related
+        .filter((candidate) => candidate.page && candidate.sourceQuote)
+        .map((candidate, sentenceIndex) => [candidate.flashcardId, sentenceIndex]),
+    )
+    setDashboardStudyDeck({
+      title: record.documentTitle,
+      documentId: record.documentId,
+      author: record.documentAuthor,
+      subject: record.subject,
+      cards: related.map((candidate) => ({
+        id: candidate.flashcardId,
+        front: candidate.question,
+        back: candidate.answer,
+        source: 'concetto',
+        score: candidate.difficulty === 'hard' ? 0.95 : candidate.difficulty === 'easy' ? 0.8 : 0.9,
+        ref: candidate.page && candidate.sourceQuote
+          ? {
+              page: candidate.page,
+              sentenceIndex: sourceIndexByCard.get(candidate.flashcardId) ?? 0,
+              text: candidate.sourceQuote,
+              section: candidate.section,
+            }
+          : null,
+      })),
+      sentences,
+    })
+  }
 
   return (
     <main className="dashboard-page section-wrap">
@@ -5761,7 +6094,7 @@ function UserDashboardPage({
           <span className="dashboard-stat-body">
             <strong>{displayCredits}</strong>
             <span className="dashboard-stat-label">Crediti disponibili</span>
-            <span className="dashboard-stat-sub">Gestisci e ricarica <ChevronRight size={13} /></span>
+            <span className="dashboard-stat-sub">Storico e impostazioni <ChevronRight size={13} /></span>
           </span>
         </button>
 
@@ -5800,7 +6133,13 @@ function UserDashboardPage({
             <p>Flashcard persistenti per materia, documento, capitolo e argomento. Gli errori tornano qui finché non li chiudi davvero.</p>
           </div>
           <span className={`dashboard-live-badge ${flashcardDataIsLive ? 'live' : ''}`}>
-            {flashcardDataIsLive ? 'Live' : flashcardDashboard?.source === 'local' ? 'Locale' : 'Demo'}
+            {flashcardDataIsLive
+              ? 'Live'
+              : flashcardDashboard?.source === 'local'
+                ? 'Locale'
+                : flashcardDashboard?.source === 'demo'
+                  ? 'Demo'
+                  : 'Nessun dato'}
           </span>
         </div>
 
@@ -5859,7 +6198,7 @@ function UserDashboardPage({
         </div>
       </section>
 
-      {wallet ? (
+      {displayedWallet ? (
         <section className="dashboard-section dashboard-credits" id="crediti" style={{ scrollMarginTop: '90px' }}>
           <div className="dashboard-section-head">
             <div>
@@ -5872,36 +6211,42 @@ function UserDashboardPage({
           <div className="credits-split-grid">
             <article className="credits-split free">
               <span className="credits-split-icon"><Sparkles size={18} /></span>
-              <strong>{wallet.wallet.free}</strong>
+              <strong>{displayedWallet.wallet.free}</strong>
               <span className="credits-split-label">Gratuiti</span>
               <small>Bonus di benvenuto · solo materiali ≤ {WELCOME_CREDITS} crediti</small>
             </article>
+            <article className="credits-split promotional">
+              <span className="credits-split-icon"><Gift size={18} /></span>
+              <strong>{displayedWallet.wallet.promotional}</strong>
+              <span className="credits-split-label">Promozionali</span>
+              <small>Bonus ricarica · spendibili ma non coperti da denaro</small>
+            </article>
             <article className="credits-split purchased">
               <span className="credits-split-icon"><CreditIcon size="sm" /></span>
-              <strong>{wallet.wallet.purchased}</strong>
+              <strong>{displayedWallet.wallet.purchased}</strong>
               <span className="credits-split-label">Acquistati</span>
               <small>Ricaricati con denaro reale · spendibili ovunque</small>
             </article>
             <article className="credits-split earned">
               <span className="credits-split-icon"><Trophy size={18} /></span>
-              <strong>{wallet.wallet.earned}</strong>
+              <strong>{displayedWallet.wallet.earned}</strong>
               <span className="credits-split-label">Guadagnati</span>
-              <small>Da vendite e ricompense · {wallet.wallet.earnedConvertible} convertibili</small>
+              <small>Da vendite e ricompense · {displayedWallet.wallet.earnedConvertible} convertibili</small>
             </article>
             <article className="credits-split total">
               <span className="credits-split-icon"><Wallet size={18} /></span>
-              <strong>{balanceOf(wallet.wallet)}</strong>
+              <strong>{balanceOf(displayedWallet.wallet)}</strong>
               <span className="credits-split-label">Saldo totale</span>
-              <small>≈ €{creditsToEur(balanceOf(wallet.wallet)).toFixed(2)} di valore di spesa</small>
+              <small>≈ €{creditsToEur(balanceOf(displayedWallet.wallet)).toFixed(2)} di valore di spesa</small>
             </article>
           </div>
 
           <div className="dashboard-credits-columns">
             <div className="dashboard-credits-purchased">
-              <h3>Documenti acquistati ({wallet.purchases.length})</h3>
-              {wallet.purchases.length ? (
+              <h3>Documenti acquistati ({displayedWallet.purchases.length})</h3>
+              {displayedWallet.purchases.length ? (
                 <div className="dashboard-doc-list">
-                  {wallet.purchases.slice(0, 6).map((purchase) => {
+                  {displayedWallet.purchases.slice(0, 6).map((purchase) => {
                     const doc = documents.find((item) => item.id === purchase.documentId)
                     return (
                       <button
@@ -5928,7 +6273,7 @@ function UserDashboardPage({
             <div className="dashboard-credits-ledger">
               <h3>Storico operazioni</h3>
               <div className="dashboard-ledger-list">
-                {wallet.ledger.slice(0, 8).map((entry) => (
+                {displayedWallet.ledger.slice(0, 8).map((entry) => (
                   <article className={`ledger-${entry.direction}`} key={entry.id}>
                     <span className="ledger-amount">{entry.direction === 'spent' ? '−' : '+'}{entry.amount}</span>
                     <div>
@@ -5936,6 +6281,7 @@ function UserDashboardPage({
                       <small>
                         {formatTimestamp(entry.ts)} · saldo {entry.balanceBefore}→{entry.balanceAfter}
                         {entry.breakdown && entry.breakdown.free > 0 ? ` · ${entry.breakdown.free} gratuiti` : ''}
+                        {entry.breakdown && entry.breakdown.promotional > 0 ? ` · ${entry.breakdown.promotional} promozionali` : ''}
                       </small>
                     </div>
                     <em className="ledger-ref">{formatTransactionRef(entry.id)}</em>
@@ -6086,6 +6432,9 @@ function UserDashboardPage({
                     <small>{record.subject} · {record.documentTitle} · {record.chapter} · {record.topic}</small>
                   </div>
                   <em>{record.correct}/{Math.max(1, record.attempts)} corrette</em>
+                  <button onClick={() => openDashboardStudyDeck(record)} type="button">
+                    <GraduationCap size={15} /> Studia deck
+                  </button>
                 </article>
               ))}
               {!filteredFlashcardRecords.length ? (
@@ -6345,6 +6694,18 @@ function UserDashboardPage({
           </div>
         </div>
       ) : null}
+      {dashboardStudyDeck ? (
+        <FlashcardStudyModal
+          cards={dashboardStudyDeck.cards}
+          documentAuthor={dashboardStudyDeck.author}
+          documentId={dashboardStudyDeck.documentId}
+          sentences={dashboardStudyDeck.sentences}
+          subject={dashboardStudyDeck.subject}
+          title={dashboardStudyDeck.title}
+          user={user}
+          onClose={() => setDashboardStudyDeck(null)}
+        />
+      ) : null}
     </main>
   )
 }
@@ -6354,14 +6715,30 @@ function SettingsPage({
   credits,
   onRoute,
   onSignOut,
+  onSellerProfileUpdated,
 }: {
   user: AppAuthUser
   credits: number
   onRoute: (route: Route) => void
   onSignOut: () => void
+  onSellerProfileUpdated: () => Promise<void>
 }) {
   const [prefs, setPrefs] = useState<NotificationPrefs | null>(null)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [sellerProfile, setSellerProfile] = useState<SellerProfilePreferences>(() => ({
+    publicDisplayName: user.name,
+    enabled: false,
+  }))
+  const [sellerProfileState, setSellerProfileState] = useState<'loading' | 'idle' | 'saving' | 'saved' | 'error'>(
+    user.isDemo ? 'idle' : 'loading',
+  )
+  const [sellerProfileMessage, setSellerProfileMessage] = useState('')
+  const [privacyRequests, setPrivacyRequests] = useState<PrivacyRequest[]>([])
+  const [privacyState, setPrivacyState] = useState<'idle' | 'loading' | 'exporting' | 'requesting' | 'cancelling' | 'error'>(
+    user.isDemo ? 'idle' : 'loading',
+  )
+  const [privacyMessage, setPrivacyMessage] = useState('')
+  const [confirmErasure, setConfirmErasure] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -6372,6 +6749,110 @@ function SettingsPage({
       active = false
     }
   }, [user])
+
+  useEffect(() => {
+    if (user.isDemo) return undefined
+    let active = true
+    void loadPrivacyRequests().then((result) => {
+      if (!active) return
+      if (result.ok) {
+        setPrivacyRequests(result.data.requests)
+        setPrivacyState('idle')
+      } else {
+        setPrivacyState('error')
+        setPrivacyMessage(result.message)
+      }
+    })
+    return () => { active = false }
+  }, [user])
+
+  useEffect(() => {
+    if (user.isDemo) return undefined
+    let active = true
+    void loadSellerProfilePreferences(user.id)
+      .then((loaded) => {
+        if (!active) return
+        setSellerProfile({
+          publicDisplayName: loaded.publicDisplayName || user.name,
+          enabled: loaded.enabled,
+        })
+        setSellerProfileState('idle')
+      })
+      .catch(() => {
+        if (!active) return
+        setSellerProfileState('error')
+        setSellerProfileMessage('Impossibile caricare le impostazioni del profilo pubblico.')
+      })
+    return () => {
+      active = false
+    }
+  }, [user])
+
+  const persistSellerProfile = async () => {
+    setSellerProfileState('saving')
+    setSellerProfileMessage('')
+    try {
+      const saved = await saveSellerProfilePreferences(user.id, sellerProfile)
+      setSellerProfile(saved)
+      await onSellerProfileUpdated()
+      setSellerProfileState('saved')
+      setSellerProfileMessage(saved.enabled ? 'Profilo venditore pubblico aggiornato.' : 'Profilo venditore impostato come privato.')
+    } catch (error) {
+      setSellerProfileState('error')
+      setSellerProfileMessage(error instanceof Error ? error.message : 'Salvataggio non riuscito.')
+    }
+  }
+
+  const downloadPrivacyExport = async () => {
+    setPrivacyState('exporting')
+    setPrivacyMessage('')
+    const result = await exportAccountData()
+    if (!result.ok) {
+      setPrivacyState('error')
+      setPrivacyMessage(result.message)
+      return
+    }
+    const blob = new Blob([JSON.stringify(result.data.export, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `unimidoc-export-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.append(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+    setPrivacyState('idle')
+    setPrivacyMessage(`Esportazione verificata (${result.data.manifestSha256.slice(0, 12)}…).`)
+  }
+
+  const submitErasureRequest = async () => {
+    setPrivacyState('requesting')
+    setPrivacyMessage('')
+    const result = await requestAccountErasure()
+    if (!result.ok) {
+      setPrivacyState('error')
+      setPrivacyMessage(result.message)
+      return
+    }
+    setPrivacyRequests((current) => [result.data.request, ...current.filter((item) => item.id !== result.data.request.id)])
+    setConfirmErasure(false)
+    setPrivacyState('idle')
+    setPrivacyMessage(result.data.request.public_message ?? 'Richiesta registrata.')
+  }
+
+  const cancelErasureRequest = async (requestId: string) => {
+    setPrivacyState('cancelling')
+    setPrivacyMessage('')
+    const result = await cancelAccountErasure(requestId)
+    if (!result.ok) {
+      setPrivacyState('error')
+      setPrivacyMessage(result.message)
+      return
+    }
+    setPrivacyRequests((current) => current.map((item) => item.id === requestId ? result.data.request : item))
+    setPrivacyState('idle')
+    setPrivacyMessage('Richiesta di cancellazione annullata.')
+  }
 
   const toggleChannel = (categoryId: string, channel: NotificationChannel) => {
     setPrefs((current) => {
@@ -6425,9 +6906,56 @@ function SettingsPage({
             <strong>{credits}</strong>
             <p>I {WELCOME_CREDITS} crediti di benvenuto bastano per sbloccare una dispensa base o standard.</p>
             <button className="secondary-action" onClick={() => onRoute('premium')} type="button">
-              <Crown size={16} /> Ricarica con Premium
+              <Crown size={16} /> Piani e crediti
             </button>
           </article>
+          {!user.isDemo ? (
+            <>
+            <article className="settings-credit-card settings-public-profile">
+              <span className="settings-credit-label"><User size={16} /> Profilo venditore</span>
+              <p>Pubblica nome e materiali solo se vuoi comparire nelle schede e nella classifica autori.</p>
+              <label className="settings-public-name">
+                <span>Nome pubblico</span>
+                <input
+                  maxLength={80}
+                  onChange={(event) => setSellerProfile((current) => ({ ...current, publicDisplayName: event.target.value }))}
+                  placeholder="Nome o pseudonimo"
+                  type="text"
+                  value={sellerProfile.publicDisplayName}
+                />
+              </label>
+              <label className="settings-public-toggle">
+                <input
+                  checked={sellerProfile.enabled}
+                  onChange={(event) => setSellerProfile((current) => ({ ...current, enabled: event.target.checked }))}
+                  type="checkbox"
+                />
+                <span>Rendi pubblico il profilo venditore</span>
+              </label>
+              <small>Se lo disattivi, nome e identificatore venditore vengono rimossi anche dai progressi e dalle valutazioni materializzate degli altri utenti.</small>
+              <button
+                className="secondary-action"
+                disabled={sellerProfileState === 'loading' || sellerProfileState === 'saving'}
+                onClick={() => void persistSellerProfile()}
+                type="button"
+              >
+                {sellerProfileState === 'saving' ? <Loader2 className="spin" size={15} /> : <Check size={15} />}
+                Salva visibilità
+              </button>
+              {sellerProfileMessage ? (
+                <span
+                  className={`settings-profile-message ${sellerProfileState === 'error' ? 'error' : ''}`}
+                  role={sellerProfileState === 'error' ? 'alert' : 'status'}
+                >
+                  {sellerProfileMessage}
+                </span>
+              ) : null}
+            </article>
+            <Suspense fallback={<article className="settings-credit-card"><Loader2 className="spin" size={17} /> Carico lo stato incassi…</article>}>
+              <SellerPayoutPanel />
+            </Suspense>
+            </>
+          ) : null}
           <button className="settings-logout" onClick={onSignOut} type="button">
             <LogOut size={16} /> Esci dall’account
           </button>
@@ -6506,6 +7034,75 @@ function SettingsPage({
               ))}
             </>
           )}
+
+          <section className="settings-privacy-center" id="privacy" style={{ scrollMarginTop: '90px' }}>
+            <div className="settings-section-head">
+              <div>
+                <h2><Shield size={18} /> Privacy e dati account</h2>
+                <p>Esporta i dati in formato portabile o avvia una richiesta tracciata di cancellazione.</p>
+              </div>
+              <button className="plain-action" onClick={() => onRoute('privacy')} type="button">Leggi l’informativa</button>
+            </div>
+
+            {user.isDemo ? (
+              <p className="settings-privacy-note">La modalità demo usa soltanto dati locali del browser. Esportazione e cancellazione server sono disponibili per gli account reali.</p>
+            ) : (
+              <div className="settings-privacy-actions">
+                <article>
+                  <FileDown size={21} />
+                  <div>
+                    <strong>Esporta i miei dati</strong>
+                    <p>JSON con profilo, documenti, libreria, crediti, acquisti, preferenze e progressi disponibili.</p>
+                  </div>
+                  <button className="secondary-action" disabled={privacyState !== 'idle' && privacyState !== 'error'} onClick={() => void downloadPrivacyExport()} type="button">
+                    {privacyState === 'exporting' ? <Loader2 className="spin" size={15} /> : <Download size={15} />} Esporta
+                  </button>
+                </article>
+
+                <article className="danger">
+                  <Trash2 size={21} />
+                  <div>
+                    <strong>Richiedi cancellazione</strong>
+                    <p>La richiesta viene verificata; i dati soggetti a obblighi contabili possono essere conservati in forma limitata o pseudonimizzata.</p>
+                  </div>
+                  <button className="secondary-action" disabled={privacyState !== 'idle' && privacyState !== 'error'} onClick={() => setConfirmErasure(true)} type="button">Avvia richiesta</button>
+                </article>
+              </div>
+            )}
+
+            {confirmErasure ? (
+              <div className="settings-erasure-confirm" role="dialog" aria-modal="true" aria-label="Conferma richiesta cancellazione">
+                <strong>Confermi la richiesta di cancellazione?</strong>
+                <p>Non perderai subito l’accesso: riceverai prima uno stato tracciato e potrai annullare finché la lavorazione non inizia.</p>
+                <div>
+                  <button className="plain-action" onClick={() => setConfirmErasure(false)} type="button">Annulla</button>
+                  <button className="settings-danger-action" disabled={privacyState === 'requesting'} onClick={() => void submitErasureRequest()} type="button">
+                    {privacyState === 'requesting' ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />} Conferma richiesta
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {privacyRequests.length ? (
+              <div className="settings-privacy-requests">
+                <h3>Richieste recenti</h3>
+                {privacyRequests.slice(0, 4).map((request) => (
+                  <article key={request.id}>
+                    <div>
+                      <strong>{request.request_type === 'erasure' ? 'Cancellazione account' : request.request_type}</strong>
+                      <span className={`privacy-status ${request.status}`}>{request.status.replaceAll('_', ' ')}</span>
+                      <small>{new Date(request.requested_at).toLocaleString('it-IT')}</small>
+                    </div>
+                    <p>{request.public_message}</p>
+                    {request.request_type === 'erasure' && ['queued', 'identity_check'].includes(request.status) ? (
+                      <button className="plain-action" disabled={privacyState === 'cancelling'} onClick={() => void cancelErasureRequest(request.id)} type="button">Annulla richiesta</button>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            ) : null}
+            {privacyMessage ? <p className={`settings-profile-message ${privacyState === 'error' ? 'error' : ''}`} role={privacyState === 'error' ? 'alert' : 'status'}>{privacyMessage}</p> : null}
+          </section>
         </section>
       </div>
     </main>
@@ -6583,17 +7180,23 @@ function App() {
   const initialRoute = routeFromPathname(window.location.pathname)
   const [route, setRoute] = useState<Route>(initialRoute)
   const [routeDocument, setRouteDocument] = useState<DocumentItem | null>(() =>
-    initialRoute === 'document' ? findDocumentByPath(window.location.pathname, appDocuments) : null,
+    initialRoute === 'document' && !isSupabaseConfigured
+      ? findDocumentByPath(window.location.pathname, appDocuments)
+      : null,
   )
-  const [routeProfile, setRouteProfile] = useState<string | null>(() =>
-    initialRoute === 'profile' ? findUploaderBySlug(window.location.pathname, appDocuments) : null,
+  const [routeProfile, setRouteProfile] = useState<PublicProfileRef | null>(() =>
+    initialRoute === 'profile' && !isSupabaseConfigured
+      ? findUploaderBySlug(window.location.pathname, appDocuments)
+      : null,
   )
   const [authMode, setAuthMode] = useState<AuthMode>(authModeFromRoute(initialRoute))
   const [authUser, setAuthUser] = useState<AppAuthUser | null>(() => loadStoredDemoUser())
-  const [credits, setCredits] = useState(120)
+  const [credits, setCredits] = useState(() => (isSupabaseConfigured ? 0 : 120))
   const [walletState, setWalletState] = useState<WalletState | null>(null)
   const [purchaseModal, setPurchaseModal] = useState<{ item: PurchasedItem; document: DocumentItem } | null>(null)
+  const [purchasePendingId, setPurchasePendingId] = useState<string | null>(null)
   const [uploads, setUploads] = useState<DocumentItem[]>([])
+  const [liveCatalog, setLiveCatalog] = useState<DocumentItem[]>([])
   const [initialSubject, setInitialSubject] = useState(subjectFromSearch)
   const [initialQuery, setInitialQuery] = useState(queryFromSearch)
   const [previewDocument, setPreviewDocument] = useState<DocumentItem | null>(null)
@@ -6603,6 +7206,10 @@ function App() {
   // route guard, otherwise a refresh on /dashboard bounces a valid session to login.
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured)
   const isLoggedIn = Boolean(authUser)
+  const visibleDocuments = useMemo(
+    () => (!isSupabaseConfigured || authUser?.isDemo ? appDocuments : liveCatalog),
+    [authUser?.isDemo, liveCatalog],
+  )
 
   const navigateRoute = (nextRoute: Route, options?: { replace?: boolean; search?: string; hash?: string }) => {
     const hash = options?.hash ? `#${options.hash}` : ''
@@ -6618,10 +7225,11 @@ function App() {
     if (hash) window.dispatchEvent(new CustomEvent('ud-section', { detail: options?.hash }))
   }
 
-  const openProfile = (name: string) => {
-    const nextPath = `${routePaths.profile}/${authorSlug(name)}`
+  const openProfile = (name: string, sellerId?: string) => {
+    const profile = { name, sellerId }
+    const nextPath = publicProfilePath(profile)
     setRoute('profile')
-    setRouteProfile(name)
+    setRouteProfile(profile)
     if (window.location.pathname !== nextPath) {
       window.history.pushState({ route: 'profile' }, '', nextPath)
     }
@@ -6647,8 +7255,8 @@ function App() {
     const onPopState = () => {
       const nextRoute = routeFromPathname(window.location.pathname)
       setRoute(nextRoute)
-      setRouteDocument(nextRoute === 'document' ? findDocumentByPath(window.location.pathname, appDocuments) : null)
-      setRouteProfile(nextRoute === 'profile' ? findUploaderBySlug(window.location.pathname, appDocuments) : null)
+      setRouteDocument(nextRoute === 'document' ? findDocumentByPath(window.location.pathname, visibleDocuments) : null)
+      setRouteProfile(nextRoute === 'profile' ? findUploaderBySlug(window.location.pathname, visibleDocuments) : null)
       setAuthMode(authModeFromRoute(nextRoute))
       if (nextRoute === 'app') {
         setInitialSubject(subjectFromSearch())
@@ -6658,7 +7266,45 @@ function App() {
 
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
-  }, [])
+  }, [visibleDocuments])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || authUser?.isDemo) return
+    let active = true
+    void loadPublicDocumentCatalog()
+      .then((documents) => {
+        if (active) setLiveCatalog(documents)
+      })
+      .catch(() => {
+        if (active) setLiveCatalog([])
+      })
+    return () => {
+      active = false
+    }
+  }, [authUser?.isDemo])
+
+  useEffect(() => {
+    if (!authUser || authUser.isDemo || !isSupabaseConfigured) {
+      if (!authUser) setUploads([])
+      return
+    }
+    let active = true
+    void loadOwnedDocuments(authUser.id)
+      .then((documents) => {
+        if (active) setUploads(documents)
+      })
+      .catch(() => {
+        if (active) setUploads([])
+      })
+    return () => {
+      active = false
+    }
+  }, [authUser])
+
+  useEffect(() => {
+    if (route === 'document') setRouteDocument(findDocumentByPath(window.location.pathname, visibleDocuments))
+    if (route === 'profile') setRouteProfile(findUploaderBySlug(window.location.pathname, visibleDocuments))
+  }, [route, visibleDocuments])
 
   useEffect(() => {
     window.scrollTo({ left: 0, top: 0 })
@@ -6671,17 +7317,17 @@ function App() {
     const title = isDocPage
       ? documentSeoTitle(routeDocument)
       : isProfilePage
-        ? `${routeProfile} · Appunti Scienze Biologiche UniMi | UnimiDoc`
+        ? `${routeProfile.name} · Appunti Scienze Biologiche UniMi | UnimiDoc`
         : seo.title
     const descriptionText = isDocPage
       ? documentSeoDescription(routeDocument)
       : isProfilePage
-        ? `Materiali, valutazioni e vendite di ${routeProfile} per Scienze Biologiche L-13 alla Statale di Milano.`
+        ? `Materiali, valutazioni e vendite di ${routeProfile.name} per Scienze Biologiche L-13 alla Statale di Milano.`
         : seo.description
     const canonicalPath = isDocPage
       ? documentPath(routeDocument)
       : isProfilePage
-        ? `${routePaths.profile}/${authorSlug(routeProfile)}`
+        ? publicProfilePath(routeProfile)
         : routePaths[route === 'signup' ? 'login' : route]
     const canonicalUrl = `${window.location.origin}${canonicalPath}`
 
@@ -6724,11 +7370,11 @@ function App() {
     }
 
     if (route === 'app') {
-      setJsonLd('ranking', uploaderRankJsonLd(buildUploaderRanking(appDocuments).slice(0, 5), window.location.origin))
+      setJsonLd('ranking', uploaderRankJsonLd(buildUploaderRanking(visibleDocuments).slice(0, 5), window.location.origin))
     } else {
       setJsonLd('ranking', null)
     }
-  }, [route, routeDocument])
+  }, [route, routeDocument, routeProfile, visibleDocuments])
 
   const notify = (message: string) => {
     setToast(message)
@@ -6768,10 +7414,16 @@ function App() {
   // The wallet drives the demo experience (persistent, split, ledger). Live
   // users keep the DB balance path below.
   const walletMode = Boolean(authUserId) && (!isSupabaseConfigured || authUserIsDemo)
+  const refreshBillingAccount = useCallback(async () => {
+    if (!authUserId || authUserIsDemo || !isSupabaseConfigured) return
+    const [balance] = await Promise.all([getUserCreditBalance(), refreshPremiumState()])
+    if (typeof balance === 'number') setCredits(balance)
+  }, [authUserId, authUserIsDemo])
 
   useEffect(() => {
     if (!authUserId || !walletMode) {
       setWalletState(null)
+      if (!authUserId) setCredits(isSupabaseConfigured ? 0 : 120)
       return
     }
     const state = ensureWallet(authUserId, { grantWelcome: true })
@@ -6783,6 +7435,7 @@ function App() {
     if (!authUserId || authUserIsDemo || !isSupabaseConfigured) return undefined
 
     let active = true
+    setCredits(0)
     void getUserCreditBalance().then((balance) => {
       if (active && typeof balance === 'number') setCredits(balance)
     })
@@ -6865,13 +7518,13 @@ function App() {
     }
   }
 
-  const handleDownload = (document: DocumentItem) => {
+  const handleDownload = async (document: DocumentItem) => {
     if (!isLoggedIn) {
       goAuth('login')
       notify('Accedi per scaricare e salvare questo appunto.')
       return
     }
-    const price = documentCreditPrice(document)
+    const price = effectiveDocumentPrice(document)
 
     // Wallet mode (demo): persistent purchase with split, ledger, library entry
     // and a confirmation modal.
@@ -6887,10 +7540,10 @@ function App() {
       if (!result.ok) {
         if (result.reason === 'free_only_low_cost') {
           navigateRoute('premium')
-          notify(`I crediti gratuiti sbloccano solo materiali fino a ${WELCOME_CREDITS} crediti. Ricarica per questo documento.`)
+          notify(`I crediti gratuiti sbloccano solo materiali fino a ${WELCOME_CREDITS} crediti. Puoi guadagnarne altri caricando materiale approvato.`)
         } else {
           navigateRoute('premium')
-          notify(`Servono ${price} crediti per questa dispensa: ricarica o passa a Premium.`)
+          notify(`Servono ${price} crediti per questa dispensa. Puoi guadagnarne altri caricando materiale approvato.`)
         }
         return
       }
@@ -6901,15 +7554,55 @@ function App() {
       return
     }
 
-    // Live path (DB balance). The authoritative deduction happens server-side
-    // via the purchase_document RPC; here we optimistically reflect it.
+    // Live path: only the atomic RPC may mutate balance/purchase/payout. Static
+    // fixture IDs are deliberately rejected instead of showing false success.
+    if (!isPersistedFlashcardId(document.id)) {
+      notify('Questo è un materiale dimostrativo: gli acquisti reali saranno disponibili nel catalogo sincronizzato.')
+      return
+    }
+    if (purchasePendingId === document.id) return
     if (credits < price) {
       navigateRoute('premium')
       notify(`Servono ${price} crediti per questa dispensa: Premium ti aiuta quando sei a corto.`)
       return
     }
-    setCredits((value) => value - price)
-    notify(`Dispensa sbloccata: ${price} crediti usati bene.`)
+    const balanceBefore = credits
+    setPurchasePendingId(document.id)
+    try {
+      const purchase = await purchaseDocument(document.id)
+      const persistedBalance = await getUserCreditBalance()
+      const balanceAfter = typeof persistedBalance === 'number'
+        ? persistedBalance
+        : balanceBefore
+      setCredits(balanceAfter)
+      setPreviewDocument(null)
+      setPurchaseModal({
+        document,
+        item: {
+          transactionId: purchase.id,
+          documentId: document.id,
+          title: document.title,
+          subject: document.subject,
+          type: document.type,
+          university: document.university ?? 'Università degli Studi di Milano',
+          course: document.degreeCourse ?? 'Scienze Biologiche L-13',
+          professor: document.professor,
+          academicYear: document.academicYear,
+          uploader: document.uploader,
+          purchasedAt: new Date(purchase.created_at).getTime(),
+          creditsSpent: purchase.credits_spent,
+          balanceBefore,
+          balanceAfter,
+          eurValue: creditsToEur(purchase.credits_spent),
+          pages: document.pages,
+        },
+      })
+      notify(`Dispensa sbloccata: ${purchase.credits_spent} crediti registrati.`)
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Acquisto non completato. Il saldo non è stato modificato.')
+    } finally {
+      setPurchasePendingId(null)
+    }
   }
 
   const openPremiumFromPreview = () => {
@@ -6919,16 +7612,21 @@ function App() {
   }
 
   const publishUpload = (document: DocumentItem) => {
-    const reward = 25
+    // Il premio live nasce soltanto dalla moderazione backend. Accreditarlo al
+    // submit permetterebbe refresh/doppio invio e mostrerebbe un saldo falso.
+    // La demo locale conserva invece il feedback didattico del prototipo.
+    const reward = walletMode ? 25 : 0
     setUploads((current) => [document, ...current])
-    if (walletMode && authUserId) {
+    if (reward > 0 && walletMode && authUserId) {
       const state = addEarnedCredits(authUserId, reward, 'Caricamento approvato')
       setWalletState(state)
       setCredits(balanceOf(state.wallet))
-    } else {
+    } else if (reward > 0) {
       setCredits((value) => value + reward)
     }
-    notify(`Caricamento inviato in revisione: +${reward} crediti.`)
+    notify(reward > 0
+      ? `Caricamento demo completato: +${reward} crediti locali.`
+      : 'Caricamento inviato in revisione. I crediti saranno assegnati solo dopo l’approvazione.')
     return reward
   }
 
@@ -6939,7 +7637,7 @@ function App() {
 
   useEffect(() => {
     if (!authReady) return
-    const privateRoute = route === 'dashboard' || route === 'library' || route === 'settings'
+    const privateRoute = route === 'dashboard' || route === 'library' || route === 'settings' || route === 'upload'
     if (!privateRoute || isLoggedIn) return
 
     setAuthMode('login')
@@ -6961,7 +7659,7 @@ function App() {
       {route === 'app' ? (
         <AppHome
           credits={credits}
-          documents={appDocuments}
+          documents={visibleDocuments}
           initialSubject={initialSubject}
           isLoggedIn={isLoggedIn}
           onAuth={goAuth}
@@ -6976,7 +7674,7 @@ function App() {
       {route === 'document' ? (
         <DocumentPage
           document={routeDocument}
-          documents={appDocuments}
+          documents={visibleDocuments}
           onDownload={handleDownload}
           onOpenDocument={openDocumentPage}
           onOpenProfile={openProfile}
@@ -6986,20 +7684,44 @@ function App() {
       ) : null}
       {route === 'profile' ? (
         <PublicProfilePage
-          uploaderName={routeProfile}
-          documents={appDocuments}
+          profile={routeProfile}
+          documents={visibleDocuments}
           onRoute={navigateRoute}
           onOpenDocument={openDocumentPage}
         />
       ) : null}
-      {route === 'premium' ? <PremiumPage onRoute={navigateRoute} /> : null}
-      {route === 'upload' ? <UploadPage onRoute={navigateRoute} onPublish={publishUpload} user={authUser} /> : null}
+      {route === 'premium' ? (
+        <PremiumPage
+          user={authUser}
+          onBillingUpdated={refreshBillingAccount}
+          onLogin={() => {
+            setAuthMode('login')
+            navigateRoute('login', { search: '?next=/premium' })
+          }}
+          onRoute={navigateRoute}
+        />
+      ) : null}
+      {isLegalRoute(route) ? (
+        <Suspense fallback={<main className="dashboard-loading section-wrap"><Loader2 className="spin" size={22} /><p>Carico il documento legale…</p></main>}>
+          <LegalPage route={route} onRoute={navigateRoute} />
+        </Suspense>
+      ) : null}
+      {route === 'upload' ? (
+        authUser ? (
+          <UploadPage onRoute={navigateRoute} onPublish={publishUpload} user={authUser} />
+        ) : !authReady ? (
+          <main className="dashboard-loading section-wrap">
+            <Loader2 className="spin" size={22} />
+            <p>Preparo il caricamento sicuro…</p>
+          </main>
+        ) : null
+      ) : null}
       {route === 'library' || route === 'dashboard' ? (
         authUser ? (
           <UserDashboardPage
             credits={credits}
             wallet={walletState}
-            documents={appDocuments}
+            documents={visibleDocuments}
             onPreview={setPreviewDocument}
             onOpenDocument={openDocumentPage}
             onRoute={navigateRoute}
@@ -7016,7 +7738,16 @@ function App() {
       ) : null}
       {route === 'settings' ? (
         authUser ? (
-          <SettingsPage credits={credits} user={authUser} onRoute={navigateRoute} onSignOut={() => void handleSignOut()} />
+          <SettingsPage
+            credits={credits}
+            user={authUser}
+            onRoute={navigateRoute}
+            onSignOut={() => void handleSignOut()}
+            onSellerProfileUpdated={async () => {
+              if (!isSupabaseConfigured || authUser.isDemo) return
+              setLiveCatalog(await loadPublicDocumentCatalog())
+            }}
+          />
         ) : !authReady ? (
           <main className="dashboard-loading section-wrap">
             <Loader2 className="spin" size={22} />

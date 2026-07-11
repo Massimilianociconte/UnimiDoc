@@ -34,6 +34,9 @@ export type DocumentItem = {
   verified: boolean
   premium: boolean
   uploader: string
+  /** Stable public identifier, present only when the seller opted in. */
+  sellerId?: string
+  sellerPublic?: boolean
   uploaderTrust: number
   fileHash: string
   malwareScan: 'pulito' | 'in corso' | 'sospetto'

@@ -7,6 +7,16 @@
 import { preflight, jsonResponse, errorResponse, errors } from '../_shared/http.ts'
 import { requireUser, adminClient } from '../_shared/supabase.ts'
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+type RagJobRow = {
+  document_id: string
+  status: string
+  chunks_total: number
+  chunks_embedded: number
+  error_message: string | null
+  created_at: string
+}
+
 // deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
   const pre = preflight(req)
@@ -17,11 +27,15 @@ import { requireUser, adminClient } from '../_shared/supabase.ts'
     const admin = adminClient()
 
     const body = await req.json().catch(() => null)
-    const ids = Array.isArray(body?.documentIds) ? body.documentIds.map((v: unknown) => String(v)).filter(Boolean) : []
+    const rawIds: string[] = Array.isArray(body?.documentIds)
+      ? body.documentIds.map((value: unknown) => String(value))
+      : []
+    const ids = [...new Set(rawIds.filter((value) => UUID_RE.test(value)))].slice(0, 50)
     if (ids.length === 0) throw errors.badRequest('documentIds obbligatorio.')
 
     // Only surface docs the caller may access (owner / buyer / published).
-    const { data: accessible } = await admin.rpc('rag_accessible_document_ids', { p_user: userId })
+    const { data: accessible, error: accessError } = await admin.rpc('rag_accessible_document_ids', { p_user: userId })
+    if (accessError) throw errors.badRequest(`Verifica accesso non riuscita: ${accessError.message}`)
     const allowed = new Set((accessible ?? []).map((r: { document_id: string }) => r.document_id))
     const requested = ids.filter((id: string) => allowed.has(id))
 
@@ -36,8 +50,10 @@ import { requireUser, adminClient } from '../_shared/supabase.ts'
       .in('document_id', requested.length ? requested : ['00000000-0000-0000-0000-000000000000'])
       .order('created_at', { ascending: false })
 
-    const latestJob = new Map<string, (typeof jobs)[number]>()
-    for (const job of jobs ?? []) if (!latestJob.has(job.document_id)) latestJob.set(job.document_id, job)
+    const latestJob = new Map<string, RagJobRow>()
+    for (const job of (jobs ?? []) as RagJobRow[]) {
+      if (!latestJob.has(job.document_id)) latestJob.set(job.document_id, job)
+    }
 
     const statuses = (docs ?? []).map((d) => {
       const job = latestJob.get(d.id)
