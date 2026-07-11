@@ -93,14 +93,8 @@ function selectPromptMatches(matches: Match[]): Match[] {
     const admin = adminClient()
     const scoped = userClient(req) // carries the caller JWT -> auth.uid() in the RPC
 
-    const entitlement = await getEntitlement(admin, userId)
-    await enforceRateLimit(
-      admin,
-      userId,
-      'rag_query',
-      entitlement.isPremium ? config.limits.ragQueriesPremiumPerMonth : config.limits.ragQueriesFreePerMonth,
-    )
-
+    // Validate the payload BEFORE spending rate-limit quota or DB roundtrips:
+    // a malformed request must never consume the user's monthly budget.
     const body = await req.json().catch(() => null)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
     const query = String(body.query ?? '').trim()
@@ -113,6 +107,14 @@ function selectPromptMatches(matches: Match[]): Match[] {
     if (rawDocumentIds && rawDocumentIds.length !== documentIds!.length) throw errors.badRequest('documentIds contiene valori non validi.')
     const requestedMatchCount = Number(body.matchCount ?? 8)
     const matchCount = Number.isFinite(requestedMatchCount) ? Math.max(1, Math.min(requestedMatchCount, 12)) : 8
+
+    const entitlement = await getEntitlement(admin, userId)
+    await enforceRateLimit(
+      admin,
+      userId,
+      'rag_query',
+      entitlement.isPremium ? config.limits.ragQueriesPremiumPerMonth : config.limits.ragQueriesFreePerMonth,
+    )
 
     // 1) Embed the query (server-side, same model as the documents).
     const provider = getEmbeddingProvider()

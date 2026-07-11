@@ -24,6 +24,8 @@ import {
   Gift,
   Highlighter,
   Layers,
+  LayoutDashboard,
+  Library,
   ListChecks,
   Loader2,
   Lock,
@@ -85,6 +87,7 @@ import {
   searchableCourses,
   type CourseInfo,
   type CourseLine,
+  type CourseYear,
 } from './courseCatalog'
 import { documentTypes, initialDocuments, professors, subjects, type DocumentItem } from './data'
 import { DEFAULT_FREE_FLASHCARD_LIMIT, DEFAULT_PREMIUM_FLASHCARD_LIMIT } from './lib/flashcardConfig'
@@ -906,6 +909,126 @@ function DemoDocumentModal({ onClose, onPremium }: { onClose: () => void; onPrem
   )
 }
 
+const SUBJECT_YEAR_FILTERS: Array<{ key: CourseYear | 'all'; label: string }> = [
+  { key: 'all', label: 'Tutte' },
+  { key: '1 anno', label: '1º anno' },
+  { key: '2 anno', label: '2º anno' },
+  { key: '3 anno', label: '3º anno' },
+  { key: 'Scelta', label: 'A scelta' },
+]
+
+function SubjectsShowcase({ onExploreSubject }: { onExploreSubject: (value: string) => void }) {
+  const [yearFilter, setYearFilter] = useState<CourseYear | 'all'>('all')
+  const [expanded, setExpanded] = useState(false)
+  const [canScrollBack, setCanScrollBack] = useState(false)
+  const [canScrollForward, setCanScrollForward] = useState(true)
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+
+  const visibleCourses = useMemo(
+    () => (yearFilter === 'all' ? courseStats : courseStats.filter((course) => course.year === yearFilter)),
+    [yearFilter],
+  )
+
+  const updateScrollState = useCallback(() => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    const maxScroll = scroller.scrollWidth - scroller.clientWidth
+    setCanScrollBack(scroller.scrollLeft > 8)
+    setCanScrollForward(scroller.scrollLeft < maxScroll - 8)
+  }, [])
+
+  useEffect(() => {
+    if (expanded) return
+    updateScrollState()
+  }, [expanded, visibleCourses, updateScrollState])
+
+  const scrollByCards = (direction: 1 | -1) => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    scroller.scrollBy({ left: direction * Math.round(scroller.clientWidth * 0.85), behavior: 'smooth' })
+  }
+
+  const selectYear = (key: CourseYear | 'all') => {
+    setYearFilter(key)
+    scrollerRef.current?.scrollTo({ left: 0 })
+  }
+
+  return (
+    <section className="section-wrap subjects-showcase" aria-labelledby="subjects-title">
+      <div className="section-title">
+        <div>
+          <h2 id="subjects-title">Materie L-13 alla Statale</h2>
+          <p className="subjects-showcase-lead">Tutti gli insegnamenti del corso, ordinati per anno.</p>
+        </div>
+        <button
+          aria-expanded={expanded}
+          className="subjects-expand-toggle"
+          onClick={() => setExpanded((value) => !value)}
+          type="button"
+        >
+          {expanded ? 'Mostra carosello' : `Vedi tutte (${visibleCourses.length})`}
+          <ChevronDown className={expanded ? 'is-open' : ''} size={16} />
+        </button>
+      </div>
+      <div aria-label="Filtra le materie per anno" className="subjects-year-chips" role="tablist">
+        {SUBJECT_YEAR_FILTERS.map((filter) => (
+          <button
+            aria-selected={yearFilter === filter.key}
+            className={yearFilter === filter.key ? 'selected' : ''}
+            key={filter.key}
+            onClick={() => selectYear(filter.key)}
+            role="tab"
+            type="button"
+          >
+            {filter.label}
+          </button>
+        ))}
+      </div>
+      {expanded ? (
+        <div className="exam-grid">
+          {visibleCourses.map((course) => (
+            <button className="exam-card" key={course.name} onClick={() => onExploreSubject(course.name)} type="button">
+              <SubjectIcon name={course.name} />
+              <strong>{course.shortName}</strong>
+              <small>{course.year} · {course.semester} · {course.cfu} CFU</small>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="subjects-carousel">
+          <button
+            aria-label="Materie precedenti"
+            className="subjects-carousel-arrow back"
+            disabled={!canScrollBack}
+            onClick={() => scrollByCards(-1)}
+            type="button"
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <div className="subjects-carousel-track" onScroll={updateScrollState} ref={scrollerRef}>
+            {visibleCourses.map((course) => (
+              <button className="exam-card subject-slide" key={course.name} onClick={() => onExploreSubject(course.name)} type="button">
+                <SubjectIcon name={course.name} />
+                <strong>{course.shortName}</strong>
+                <small>{course.year} · {course.semester} · {course.cfu} CFU</small>
+              </button>
+            ))}
+          </div>
+          <button
+            aria-label="Materie successive"
+            className="subjects-carousel-arrow forward"
+            disabled={!canScrollForward}
+            onClick={() => scrollByCards(1)}
+            type="button"
+          >
+            <ChevronRight size={18} />
+          </button>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function LandingPage({
   onRoute,
   onAuth,
@@ -1009,21 +1132,7 @@ function LandingPage({
         </div>
       </section>
 
-      <section className="section-wrap">
-        <div className="section-title">
-          <h2>Materie L-13 alla Statale</h2>
-          <button onClick={() => onRoute('app')} type="button">Apri la piattaforma</button>
-        </div>
-        <div className="exam-grid">
-          {courseStats.map((course) => (
-            <button className="exam-card" key={course.name} onClick={() => onExploreSubject(course.name)} type="button">
-              <SubjectIcon name={course.name} />
-              <strong>{course.shortName}</strong>
-              <small>{course.year} · {course.count}</small>
-            </button>
-          ))}
-        </div>
-      </section>
+      <SubjectsShowcase onExploreSubject={onExploreSubject} />
 
       <section className="difference-band section-wrap">
         <h2>Perché qui è diverso</h2>
@@ -5649,144 +5758,175 @@ function UploadPage({
             <div className="upload-data-head">
               <div>
                 <h2>Dati del documento</h2>
-                <p>Scegli corso e docente dal catalogo L13 2025/26 oppure inserisci manualmente se il docente e cambiato.</p>
+                <p>Tre passaggi: informazioni essenziali, dettagli del corso, presentazione. Corso e docenti arrivano dal catalogo L-13 2025/26.</p>
               </div>
               <span>Base UniMi L-13</span>
             </div>
 
-            <div className="form-grid refined">
-              <label className="field-wide">
-                Titolo
-                <input onChange={(event) => setTitle(event.target.value)} placeholder="Es. Riassunto di Genetica molecolare" value={title} />
-              </label>
-              <label className="field-wide">
-                Materia
-                <select onChange={(event) => setSubject(event.target.value)} value={subject}>
-                  {subjects.map((option) => (
-                    <option key={option}>{option}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Anno accademico
-                <select onChange={(event) => setYear(event.target.value)} value={year}>
-                  {academicYears.map((option) => (
-                    <option key={option}>{option}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Tipo materiale
-                <select onChange={(event) => setDocType(event.target.value)} value={docType}>
-                  {documentTypes.map((option) => (
-                    <option key={option}>{option}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Tipo di esame
-                <select onChange={(event) => setExamType(event.target.value)} value={examType}>
-                  {EXAM_TYPES.map((option) => (
-                    <option key={option}>{option}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Semestre
-                <select onChange={(event) => setSemester(event.target.value)} value={semester}>
-                  <option value="">Non specificato</option>
-                  <option>1 semestre</option>
-                  <option>2 semestre</option>
-                  <option>Annuale</option>
-                </select>
-              </label>
-              <label className="field-readonly">
-                Corso di laurea
-                <input value={DEGREE_COURSE} readOnly tabIndex={-1} />
-              </label>
-              <label className="field-readonly">
-                Università
-                <input value={UNIVERSITY_NAME} readOnly tabIndex={-1} />
-              </label>
-              <label className="field-wide">
-                Descrizione pubblica
-                <textarea
-                  onChange={(event) => setDescription(event.target.value)}
-                  placeholder="Cosa contiene il materiale, argomenti trattati, come è organizzato. Niente contatti o link: le comunicazioni restano su UnimiDoc."
-                  rows={3}
-                  value={description}
-                />
-              </label>
-              <label className="field-wide">
-                Tag e parole chiave <em className="field-optional">(opzionale · compilati in automatico)</em>
-                <input
-                  onChange={(event) => setTagsInput(event.target.value)}
-                  placeholder="Es. mitosi, ciclo cellulare, DNA"
-                  value={tagsInput}
-                />
-              </label>
+            <div aria-label="Completamento dei dati richiesti" className="upload-checklist" role="status">
+              <span className={title.trim().length >= 3 ? 'done' : ''}>
+                {title.trim().length >= 3 ? <CheckCircle2 size={14} /> : <i className="upload-checklist-dot" />} Titolo
+              </span>
+              <span className={professor.trim() ? 'done' : ''}>
+                {professor.trim() ? <CheckCircle2 size={14} /> : <i className="upload-checklist-dot" />} Docente
+              </span>
+              <span className={rights ? 'done' : ''}>
+                {rights ? <CheckCircle2 size={14} /> : <i className="upload-checklist-dot" />} Titolarità
+              </span>
+              <em><CreditIcon size="xs" /> Prezzo suggerito: {uploadPriceCredits} crediti</em>
             </div>
 
-            {selectedCourse ? (
-              <div className="course-match-card">
-                <SubjectIcon name={selectedCourse.name} />
-                <div>
-                  <strong>{selectedCourse.shortName}</strong>
-                  <small>{selectedCourseMeta}</small>
-                  {selectedCourse.cohortNote ? <em>{selectedCourse.cohortNote}</em> : null}
-                </div>
+            <fieldset className="upload-fieldset">
+              <legend><span className="upload-step-badge">1</span> Informazioni essenziali</legend>
+              <div className="form-grid refined">
+                <label className="field-wide">
+                  Titolo <em className="field-required">obbligatorio</em>
+                  <input
+                    maxLength={180}
+                    onChange={(event) => setTitle(event.target.value)}
+                    placeholder="Es. Riassunto di Genetica molecolare"
+                    value={title}
+                  />
+                  <small className="field-counter">{title.trim().length}/180 · minimo 3 caratteri</small>
+                </label>
+                <label className="field-wide">
+                  Materia <em className="field-required">obbligatorio</em>
+                  <select onChange={(event) => setSubject(event.target.value)} value={subject}>
+                    {subjects.map((option) => (
+                      <option key={option}>{option}</option>
+                    ))}
+                  </select>
+                </label>
               </div>
-            ) : null}
 
-            <div className="teacher-picker">
-              <div className="teacher-picker-row">
+              {selectedCourse ? (
+                <div className="course-match-card">
+                  <SubjectIcon name={selectedCourse.name} />
+                  <div>
+                    <strong>{selectedCourse.shortName}</strong>
+                    <small>{selectedCourseMeta}</small>
+                    {selectedCourse.cohortNote ? <em>{selectedCourse.cohortNote}</em> : null}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="teacher-picker">
+                <div className="teacher-picker-row">
+                  <label>
+                    Linea / edizione
+                    <select
+                      disabled={courseLines.length === 0}
+                      onChange={(event) => setCourseLine(event.target.value as CourseLine | 'Tutti')}
+                      value={courseLine}
+                    >
+                      <option value="Tutti">Tutte</option>
+                      {courseLines.map((line) => (
+                        <option key={line} value={line}>{line}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Docente <em className="field-required">obbligatorio</em>
+                    <input
+                      list="upload-professor-suggestions"
+                      onChange={(event) => setProfessor(event.target.value)}
+                      placeholder="Scrivi o scegli un docente"
+                      value={professor}
+                    />
+                  </label>
+                </div>
+                <datalist id="upload-professor-suggestions">
+                  {professorSuggestions.map((option) => (
+                    <option key={option} value={option} />
+                  ))}
+                </datalist>
+                {suggestedProfessors.length ? (
+                  <div className="professor-suggestion-chips" aria-label="Docenti suggeriti per il corso">
+                    {suggestedProfessors.map((option) => (
+                      <button
+                        className={professor === option ? 'selected' : ''}
+                        key={option}
+                        onClick={() => setProfessor(option)}
+                        type="button"
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="manual-professor-note">
+                    Nessun docente unico per questa attivita: indica il tutor o il riferimento che compare nel materiale.
+                  </p>
+                )}
+              </div>
+            </fieldset>
+
+            <fieldset className="upload-fieldset">
+              <legend><span className="upload-step-badge">2</span> Dettagli del corso</legend>
+              <div className="form-grid refined">
                 <label>
-                  Linea / edizione
-                  <select
-                    disabled={courseLines.length === 0}
-                    onChange={(event) => setCourseLine(event.target.value as CourseLine | 'Tutti')}
-                    value={courseLine}
-                  >
-                    <option value="Tutti">Tutte</option>
-                    {courseLines.map((line) => (
-                      <option key={line} value={line}>{line}</option>
+                  Anno accademico
+                  <select onChange={(event) => setYear(event.target.value)} value={year}>
+                    {academicYears.map((option) => (
+                      <option key={option}>{option}</option>
                     ))}
                   </select>
                 </label>
                 <label>
-                  Docente
+                  Tipo materiale
+                  <select onChange={(event) => setDocType(event.target.value)} value={docType}>
+                    {documentTypes.map((option) => (
+                      <option key={option}>{option}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Tipo di esame
+                  <select onChange={(event) => setExamType(event.target.value)} value={examType}>
+                    {EXAM_TYPES.map((option) => (
+                      <option key={option}>{option}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Semestre
+                  <select onChange={(event) => setSemester(event.target.value)} value={semester}>
+                    <option value="">Non specificato</option>
+                    <option>1 semestre</option>
+                    <option>2 semestre</option>
+                    <option>Annuale</option>
+                  </select>
+                </label>
+              </div>
+              <p className="upload-fixed-meta">
+                <Lock size={13} /> {DEGREE_COURSE} · {UNIVERSITY_NAME}
+              </p>
+            </fieldset>
+
+            <fieldset className="upload-fieldset">
+              <legend><span className="upload-step-badge">3</span> Presentazione</legend>
+              <div className="form-grid refined">
+                <label className="field-wide">
+                  Descrizione pubblica
+                  <textarea
+                    maxLength={2000}
+                    onChange={(event) => setDescription(event.target.value)}
+                    placeholder="Cosa contiene il materiale, argomenti trattati, come è organizzato. Niente contatti o link: le comunicazioni restano su UnimiDoc."
+                    rows={3}
+                    value={description}
+                  />
+                  <small className="field-counter">{description.length}/2000</small>
+                </label>
+                <label className="field-wide">
+                  Tag e parole chiave <em className="field-optional">(opzionale · compilati in automatico)</em>
                   <input
-                    list="upload-professor-suggestions"
-                    onChange={(event) => setProfessor(event.target.value)}
-                    placeholder="Scrivi o scegli un docente"
-                    value={professor}
+                    onChange={(event) => setTagsInput(event.target.value)}
+                    placeholder="Es. mitosi, ciclo cellulare, DNA"
+                    value={tagsInput}
                   />
                 </label>
               </div>
-              <datalist id="upload-professor-suggestions">
-                {professorSuggestions.map((option) => (
-                  <option key={option} value={option} />
-                ))}
-              </datalist>
-              {suggestedProfessors.length ? (
-                <div className="professor-suggestion-chips" aria-label="Docenti suggeriti per il corso">
-                  {suggestedProfessors.map((option) => (
-                    <button
-                      className={professor === option ? 'selected' : ''}
-                      key={option}
-                      onClick={() => setProfessor(option)}
-                      type="button"
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="manual-professor-note">
-                  Nessun docente unico per questa attivita: indica il tutor o il riferimento che compare nel materiale.
-                </p>
-              )}
-            </div>
+            </fieldset>
           </div>
 
           <label className="rights-check">
@@ -5844,6 +5984,33 @@ function UploadPage({
   )
 }
 
+type DashboardView = 'overview' | 'library' | 'study' | 'progress' | 'credits'
+
+const DASHBOARD_VIEWS: Array<{
+  key: DashboardView
+  label: string
+  hint: string
+  icon: typeof LayoutDashboard
+}> = [
+  { key: 'overview', label: 'Panoramica', hint: 'Stato generale e novità', icon: LayoutDashboard },
+  { key: 'library', label: 'Libreria', hint: 'Documenti e acquisti', icon: Library },
+  { key: 'study', label: 'Studio', hint: 'Flashcard, errori e deck', icon: BrainCircuit },
+  { key: 'progress', label: 'Progressi', hint: 'Andamento e sessioni', icon: TrendingUp },
+  { key: 'credits', label: 'Crediti', hint: 'Saldo e movimenti', icon: Wallet },
+]
+
+// Deep-link hash → dashboard view. Keeps old #crediti / #flashcard links alive.
+const DASHBOARD_HASH_VIEWS: Record<string, DashboardView> = {
+  profilo: 'overview',
+  panoramica: 'overview',
+  notifiche: 'overview',
+  libreria: 'library',
+  flashcard: 'study',
+  studio: 'study',
+  progressi: 'progress',
+  crediti: 'credits',
+}
+
 function UserDashboardPage({
   user,
   documents,
@@ -5869,6 +6036,7 @@ function UserDashboardPage({
   const [overlay, setOverlay] = useState<DashboardLiveOverlay | null>(null)
   const [liveLoading, setLiveLoading] = useState(false)
   const [activeShelfId, setActiveShelfId] = useState<string | null>(null)
+  const [activeView, setActiveView] = useState<DashboardView>('overview')
   const [sidePanel, setSidePanel] = useState<'notifications' | 'credits' | null>(null)
   const [flashcardDashboard, setFlashcardDashboard] = useState<FlashcardDashboardData | null>(null)
   const [flashcardFilters, setFlashcardFilters] = useState<FlashcardDashboardFilters>(EMPTY_FLASHCARD_FILTERS)
@@ -5881,20 +6049,29 @@ function UserDashboardPage({
     sentences: DocSentence[]
   } | null>(null)
 
-  // Deep-link to a dashboard section via #hash (from navbar / user menu).
+  // Deep-link to a dashboard view via #hash (from navbar / user menu).
   useEffect(() => {
-    const scrollToSection = (id: string | undefined) => {
+    const applySection = (id: string | undefined) => {
       if (!id) return
+      const view = DASHBOARD_HASH_VIEWS[id]
+      if (!view) return
+      setActiveView(view)
+      if (id === 'notifiche') setSidePanel('notifications')
       window.requestAnimationFrame(() => {
-        const el = document.getElementById(id)
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        document.querySelector('.dashboard-nav')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       })
     }
-    scrollToSection(window.location.hash.replace('#', '') || undefined)
-    const onSection = (event: Event) => scrollToSection((event as CustomEvent<string>).detail)
+    applySection(window.location.hash.replace('#', '') || undefined)
+    const onSection = (event: Event) => applySection((event as CustomEvent<string>).detail)
     window.addEventListener('ud-section', onSection)
     return () => window.removeEventListener('ud-section', onSection)
   }, [])
+
+  const selectView = (view: DashboardView) => {
+    setActiveView(view)
+    const hash = Object.entries(DASHBOARD_HASH_VIEWS).find(([, candidate]) => candidate === view)?.[0]
+    if (hash) window.history.replaceState(null, '', `#${hash}`)
+  }
 
   useEffect(() => {
     if (user.isDemo || !isSupabaseConfigured) {
@@ -6041,14 +6218,11 @@ function UserDashboardPage({
 
   return (
     <main className="dashboard-page section-wrap">
-      <section className="dashboard-hero">
+      <header className="dashboard-hero">
         <div>
           <span className="dashboard-kicker"><ShieldCheck size={16} /> Area riservata</span>
           <h1>Ciao {firstName}, qui tieni insieme tutto lo studio.</h1>
-          <p>
-            Documenti, crediti, flashcard, quiz e ripassi programmati in una dashboard pensata per studenti L-13,
-            sempre sincronizzata e al sicuro.
-          </p>
+          <p>Documenti, flashcard, progressi e crediti: scegli una sezione, trovi solo quello che ti serve.</p>
           <div className="dashboard-hero-actions">
             <button className="primary-action" onClick={() => onRoute('upload')} type="button">
               <Upload size={18} />
@@ -6064,9 +6238,35 @@ function UserDashboardPage({
             </button>
           </div>
         </div>
-        <img src={libraryNotes} alt="Libreria appunti" />
-      </section>
+        <img src={libraryNotes} alt="" aria-hidden="true" />
+      </header>
 
+      <nav aria-label="Sezioni della dashboard" className="dashboard-nav">
+        {DASHBOARD_VIEWS.map((view) => {
+          const ViewIcon = view.icon
+          return (
+            <button
+              aria-current={activeView === view.key ? 'page' : undefined}
+              className={`dashboard-nav-tab view-${view.key} ${activeView === view.key ? 'active' : ''}`}
+              key={view.key}
+              onClick={() => selectView(view.key)}
+              type="button"
+            >
+              <span className="dashboard-nav-icon"><ViewIcon size={17} /></span>
+              <span className="dashboard-nav-text">
+                <span className="dashboard-nav-label">{view.label}</span>
+                <small>{view.hint}</small>
+              </span>
+              {view.key === 'study' && flashcardStats.needsReview > 0 ? (
+                <em className="dashboard-nav-badge">{flashcardStats.needsReview}</em>
+              ) : null}
+            </button>
+          )
+        })}
+      </nav>
+
+      {activeView === 'overview' ? (
+      <div className="dashboard-view view-overview">
       <section className="dashboard-profile-grid" id="profilo" style={{ scrollMarginTop: '90px' }}>
         <article className="dashboard-profile-card">
           <span className="dashboard-profile-avatar">
@@ -6089,43 +6289,108 @@ function UserDashboardPage({
           </div>
         </article>
 
-        <button className="dashboard-stat stat-credits" onClick={() => onRoute('settings')} type="button">
+        <button className="dashboard-stat stat-credits" onClick={() => selectView('credits')} type="button">
           <span className="dashboard-stat-icon"><Wallet size={20} /></span>
           <span className="dashboard-stat-body">
             <strong>{displayCredits}</strong>
             <span className="dashboard-stat-label">Crediti disponibili</span>
-            <span className="dashboard-stat-sub">Storico e impostazioni <ChevronRight size={13} /></span>
+            <span className="dashboard-stat-sub">Saldo e movimenti <ChevronRight size={13} /></span>
           </span>
         </button>
 
-        <button className="dashboard-stat stat-flashcards" onClick={() => onRoute('app')} type="button">
+        <button className="dashboard-stat stat-flashcards" onClick={() => selectView('study')} type="button">
           <span className="dashboard-stat-icon"><BrainCircuit size={20} /></span>
           <span className="dashboard-stat-body">
             <strong>{totalFlashcards}</strong>
             <span className="dashboard-stat-label">Flashcard collegate</span>
-            <span className="dashboard-stat-sub">{data.decks.length} deck attivi</span>
+            <span className="dashboard-stat-sub">{data.decks.length} deck attivi <ChevronRight size={13} /></span>
           </span>
         </button>
 
-        <article className="dashboard-stat stat-progress">
+        <button className="dashboard-stat stat-progress" onClick={() => selectView('progress')} type="button">
           <span className="dashboard-stat-icon"><Target size={20} /></span>
           <span className="dashboard-stat-body">
             <strong>{averageProgress}%</strong>
             <span className="dashboard-stat-label">Progresso medio</span>
-            <span className="dashboard-stat-sub">{data.subjectProgress.length} materie seguite</span>
+            <span className="dashboard-stat-sub">{data.subjectProgress.length} materie seguite <ChevronRight size={13} /></span>
           </span>
-        </article>
+        </button>
 
-        <article className="dashboard-stat stat-reviews">
+        <button className="dashboard-stat stat-reviews" onClick={() => selectView('study')} type="button">
           <span className="dashboard-stat-icon"><RefreshCw size={20} /></span>
           <span className="dashboard-stat-body">
             <strong>{dueReviews}</strong>
             <span className="dashboard-stat-label">Ripassi programmati</span>
-            <span className="dashboard-stat-sub">Da chiudere a breve</span>
+            <span className="dashboard-stat-sub">Da chiudere a breve <ChevronRight size={13} /></span>
           </span>
-        </article>
+        </button>
       </section>
 
+      <div className="dashboard-overview-grid">
+        <section className="dashboard-section compact" id="notifiche" style={{ scrollMarginTop: '90px' }}>
+          <h2>
+            Notifiche
+            {dataIsLive ? <span className="dashboard-live-badge">Live</span> : null}
+          </h2>
+          <div className="dashboard-notification-list">
+            {data.notifications.slice(0, 3).map((notification) => (
+              <article className={notification.tone} key={notification.id}>
+                <span><Bell size={16} /></span>
+                <div>
+                  <strong>{notification.title}</strong>
+                  <p>{notification.body}</p>
+                  <small>{notification.time}</small>
+                </div>
+              </article>
+            ))}
+            {!data.notifications.length ? <p className="dashboard-empty">Nessuna notifica per ora.</p> : null}
+          </div>
+          {data.notifications.length > 3 ? (
+            <button className="dashboard-side-more" onClick={() => setSidePanel('notifications')} type="button">
+              Vedi tutte ({data.notifications.length}) <ChevronRight size={14} />
+            </button>
+          ) : null}
+        </section>
+
+        <section className="dashboard-section compact">
+          <h2>Ripassi programmati</h2>
+          <div className="dashboard-review-list">
+            {data.reviews.slice(0, 4).map((review) => (
+              <article className={review.priority} key={review.id}>
+                <span>{review.priority}</span>
+                <div>
+                  <strong>{review.title}</strong>
+                  <small>{review.subject} · {review.dueAt}</small>
+                </div>
+              </article>
+            ))}
+            {!data.reviews.length ? <p className="dashboard-empty">Nessun ripasso in scadenza. Ottimo lavoro.</p> : null}
+          </div>
+          <button className="dashboard-side-more" onClick={() => selectView('study')} type="button">
+            Apri lo studio <ChevronRight size={14} />
+          </button>
+        </section>
+
+        <section className="dashboard-section compact">
+          <h2>Suggerimenti</h2>
+          <div className="dashboard-suggestion-list">
+            {data.suggestions.map((suggestion) => (
+              <article key={suggestion.id}>
+                <Sparkles size={16} />
+                <div>
+                  <strong>{suggestion.title}</strong>
+                  <p>{suggestion.body}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+      </div>
+      ) : null}
+
+      {activeView === 'study' ? (
+      <div className="dashboard-view view-study">
       <section className="dashboard-section flashcard-command-center" id="flashcard" style={{ scrollMarginTop: '90px' }}>
         <div className="dashboard-section-head">
           <div>
@@ -6198,6 +6463,11 @@ function UserDashboardPage({
         </div>
       </section>
 
+      </div>
+      ) : null}
+
+      {activeView === 'credits' ? (
+      <div className="dashboard-view view-credits">
       {displayedWallet ? (
         <section className="dashboard-section dashboard-credits" id="crediti" style={{ scrollMarginTop: '90px' }}>
           <div className="dashboard-section-head">
@@ -6293,8 +6563,34 @@ function UserDashboardPage({
         </section>
       ) : null}
 
-      <div className="dashboard-layout">
-        <div className="dashboard-main">
+      <section className="dashboard-section compact dashboard-credit-history">
+        <h2>
+          Storico crediti
+          {dataIsLive ? <span className="dashboard-live-badge">Live</span> : null}
+        </h2>
+        <div className="dashboard-credit-ledger">
+          {data.creditHistory.slice(0, 6).map((entry) => (
+            <article className={entry.type} key={entry.id}>
+              <span>{entry.type === 'spent' ? '-' : '+'}{entry.amount}</span>
+              <div>
+                <strong>{entry.reason}</strong>
+                <small>{entry.date}</small>
+              </div>
+            </article>
+          ))}
+          {!data.creditHistory.length ? <p className="dashboard-empty">Nessun movimento registrato finora.</p> : null}
+        </div>
+        {data.creditHistory.length > 6 ? (
+          <button className="dashboard-side-more" onClick={() => setSidePanel('credits')} type="button">
+            Vedi tutto ({data.creditHistory.length}) <ChevronRight size={14} />
+          </button>
+        ) : null}
+      </section>
+      </div>
+      ) : null}
+
+      {activeView === 'library' ? (
+      <div className="dashboard-view view-library">
           <section className="dashboard-section">
             <div className="dashboard-section-head">
               <div>
@@ -6340,7 +6636,11 @@ function UserDashboardPage({
               </div>
             ) : null}
           </section>
+      </div>
+      ) : null}
 
+      {activeView === 'study' ? (
+      <div className="dashboard-view view-study">
           <section className="dashboard-section flashcard-archive">
             <div className="dashboard-section-head">
               <div>
@@ -6443,6 +6743,37 @@ function UserDashboardPage({
             </div>
           </section>
 
+          <section className="dashboard-section">
+            <div className="dashboard-section-head">
+              <div>
+                <h2>Flashcard e quiz</h2>
+                <p>Deck generati o approvati, con card in scadenza e fonte del documento.</p>
+              </div>
+              <button onClick={() => onRoute('upload')} type="button"><BrainCircuit size={15} /> Genera da PDF</button>
+            </div>
+            <div className="dashboard-deck-grid">
+              {data.decks.map((deck) => (
+                <article key={deck.id}>
+                  <div>
+                    <span><BrainCircuit size={18} /></span>
+                    <strong>{deck.mastery}%</strong>
+                  </div>
+                  <h3>{deck.title}</h3>
+                  <p>{deck.subject} · fonte {deck.source}</p>
+                  <footer>
+                    <span>{deck.cards} card</span>
+                    <span>{deck.quizzes} quiz</span>
+                    <span>{deck.due} da ripassare</span>
+                  </footer>
+                </article>
+              ))}
+            </div>
+          </section>
+      </div>
+      ) : null}
+
+      {activeView === 'progress' ? (
+      <div className="dashboard-view view-progress">
           <section className="dashboard-section author-quality-section">
             <div className="dashboard-section-head">
               <div>
@@ -6474,33 +6805,6 @@ function UserDashboardPage({
             ) : (
               <p className="dashboard-empty">Quando i tuoi materiali riceveranno valutazioni sulle flashcard, vedrai qui capitoli forti e punti da migliorare.</p>
             )}
-          </section>
-
-          <section className="dashboard-section">
-            <div className="dashboard-section-head">
-              <div>
-                <h2>Flashcard e quiz</h2>
-                <p>Deck generati o approvati, con card in scadenza e fonte del documento.</p>
-              </div>
-              <button onClick={() => onRoute('upload')} type="button"><BrainCircuit size={15} /> Genera da PDF</button>
-            </div>
-            <div className="dashboard-deck-grid">
-              {data.decks.map((deck) => (
-                <article key={deck.id}>
-                  <div>
-                    <span><BrainCircuit size={18} /></span>
-                    <strong>{deck.mastery}%</strong>
-                  </div>
-                  <h3>{deck.title}</h3>
-                  <p>{deck.subject} · fonte {deck.source}</p>
-                  <footer>
-                    <span>{deck.cards} card</span>
-                    <span>{deck.quizzes} quiz</span>
-                    <span>{deck.due} da ripassare</span>
-                  </footer>
-                </article>
-              ))}
-            </div>
           </section>
 
           <section className="dashboard-section">
@@ -6543,119 +6847,42 @@ function UserDashboardPage({
               ))}
             </div>
           </section>
-        </div>
 
-        <aside className="dashboard-side">
-          <section className="dashboard-section compact" id="notifiche" style={{ scrollMarginTop: '90px' }}>
-            <h2>
-              Notifiche
-              {dataIsLive ? <span className="dashboard-live-badge">Live</span> : null}
-            </h2>
-            <div className="dashboard-notification-list">
-              {data.notifications.slice(0, 3).map((notification) => (
-                <article className={notification.tone} key={notification.id}>
-                  <span><Bell size={16} /></span>
-                  <div>
-                    <strong>{notification.title}</strong>
-                    <p>{notification.body}</p>
-                    <small>{notification.time}</small>
-                  </div>
-                </article>
-              ))}
-            </div>
-            {data.notifications.length > 3 ? (
-              <button className="dashboard-side-more" onClick={() => setSidePanel('notifications')} type="button">
-                Vedi tutte ({data.notifications.length}) <ChevronRight size={14} />
-              </button>
-            ) : null}
-          </section>
+          <div className="dashboard-progress-columns">
+            <section className="dashboard-section compact">
+              <h2>Progressi per materia</h2>
+              <div className="dashboard-subject-list">
+                {data.subjectProgress.map((item) => (
+                  <article key={item.subject}>
+                    <div>
+                      <strong>{item.subject}</strong>
+                      <small>{item.documents} documenti · {item.due} ripassi</small>
+                    </div>
+                    <span>{item.accuracy}%</span>
+                    <div className="dashboard-progress-bar"><span style={{ width: `${item.progress}%` }} /></div>
+                  </article>
+                ))}
+              </div>
+            </section>
 
-          <section className="dashboard-section compact">
-            <h2>
-              Storico crediti
-              {dataIsLive ? <span className="dashboard-live-badge">Live</span> : null}
-            </h2>
-            <div className="dashboard-credit-ledger">
-              {data.creditHistory.slice(0, 3).map((entry) => (
-                <article className={entry.type} key={entry.id}>
-                  <span>{entry.type === 'spent' ? '-' : '+'}{entry.amount}</span>
-                  <div>
-                    <strong>{entry.reason}</strong>
-                    <small>{entry.date}</small>
-                  </div>
-                </article>
-              ))}
-            </div>
-            {data.creditHistory.length > 3 ? (
-              <button className="dashboard-side-more" onClick={() => setSidePanel('credits')} type="button">
-                Vedi tutto ({data.creditHistory.length}) <ChevronRight size={14} />
-              </button>
-            ) : null}
-          </section>
-
-          <section className="dashboard-section compact">
-            <h2>Progressi per materia</h2>
-            <div className="dashboard-subject-list">
-              {data.subjectProgress.map((item) => (
-                <article key={item.subject}>
-                  <div>
-                    <strong>{item.subject}</strong>
-                    <small>{item.documents} documenti · {item.due} ripassi</small>
-                  </div>
-                  <span>{item.accuracy}%</span>
-                  <div className="dashboard-progress-bar"><span style={{ width: `${item.progress}%` }} /></div>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="dashboard-section compact">
-            <h2>Sessioni recenti</h2>
-            <div className="dashboard-timeline">
-              {data.sessions.map((session) => (
-                <article key={session.id}>
-                  <span><BookOpen size={15} /></span>
-                  <div>
-                    <strong>{session.title}</strong>
-                    <p>{session.detail}</p>
-                    <small>{session.duration} · {session.date}</small>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="dashboard-section compact">
-            <h2>Ripassi programmati</h2>
-            <div className="dashboard-review-list">
-              {data.reviews.map((review) => (
-                <article className={review.priority} key={review.id}>
-                  <span>{review.priority}</span>
-                  <div>
-                    <strong>{review.title}</strong>
-                    <small>{review.subject} · {review.dueAt}</small>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="dashboard-section compact">
-            <h2>Suggerimenti</h2>
-            <div className="dashboard-suggestion-list">
-              {data.suggestions.map((suggestion) => (
-                <article key={suggestion.id}>
-                  <Sparkles size={16} />
-                  <div>
-                    <strong>{suggestion.title}</strong>
-                    <p>{suggestion.body}</p>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-        </aside>
+            <section className="dashboard-section compact">
+              <h2>Sessioni recenti</h2>
+              <div className="dashboard-timeline">
+                {data.sessions.map((session) => (
+                  <article key={session.id}>
+                    <span><BookOpen size={15} /></span>
+                    <div>
+                      <strong>{session.title}</strong>
+                      <p>{session.detail}</p>
+                      <small>{session.duration} · {session.date}</small>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </div>
       </div>
+      ) : null}
 
       {sidePanel ? (
         <div className="dashboard-modal" role="dialog" aria-modal="true" aria-label={sidePanel === 'notifications' ? 'Tutte le notifiche' : 'Storico crediti completo'}>
