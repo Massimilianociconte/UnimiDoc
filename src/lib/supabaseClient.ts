@@ -215,19 +215,48 @@ function mapCatalogDocument(row: CatalogRow, uploader: string, ownerView = false
   }
 }
 
+type RankingRow = {
+  document_id: string
+  overall_score: number
+  recent_score: number
+  didactic_score: number
+  review_avg: number | null
+  review_count: number
+}
+
 export async function loadPublicDocumentCatalog(): Promise<DocumentItem[]> {
   if (!supabase) return []
-  const [catalog, sellers] = await Promise.all([
+  const [catalog, sellers, rankings] = await Promise.all([
     supabase.from('public_document_catalog').select(CATALOG_COLUMNS).order('created_at', { ascending: false }),
     supabase.from('public_seller_profiles').select('id, public_display_name'),
+    // Punteggi multi-segnale calcolati dal DB (recensioni bayesiane, qualità
+    // flashcard, completezza, soddisfazione, freschezza): autoritativi per
+    // l'ordinamento e le classifiche lato client.
+    supabase
+      .from('public_document_rankings')
+      .select('document_id, overall_score, recent_score, didactic_score, review_avg, review_count'),
   ])
   if (catalog.error) throw catalog.error
   const sellerNames = new Map(
     ((sellers.data ?? []) as Array<{ id: string; public_display_name: string }>).map((seller) => [seller.id, seller.public_display_name]),
   )
+  const rankingById = new Map(
+    ((rankings.data ?? []) as RankingRow[]).map((row) => [row.document_id, row]),
+  )
   return ((catalog.data ?? []) as unknown as CatalogRow[]).map((row) => {
     const publicName = row.seller_id ? sellerNames.get(row.seller_id) : undefined
-    return mapCatalogDocument(row, publicName ?? 'Profilo venditore privato', false, Boolean(publicName))
+    const item = mapCatalogDocument(row, publicName ?? 'Profilo venditore privato', false, Boolean(publicName))
+    const ranking = rankingById.get(row.id)
+    if (ranking) {
+      item.serverRanking = {
+        overall: Number(ranking.overall_score),
+        recent: Number(ranking.recent_score),
+        didactic: Number(ranking.didactic_score),
+        reviewAvg: ranking.review_avg == null ? null : Number(ranking.review_avg),
+        reviewCount: ranking.review_count,
+      }
+    }
+    return item
   })
 }
 

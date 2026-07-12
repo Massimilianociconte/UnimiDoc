@@ -54,6 +54,8 @@ export type DocumentItem = {
   semester?: string
   tags?: string[]
   compatibleExams?: string[]
+  /** Punteggi autoritativi dal DB (vista public_document_rankings). */
+  serverRanking?: { overall: number; recent: number; didactic: number; reviewAvg?: number | null; reviewCount?: number }
 }
 
 export type AuditEntry = {

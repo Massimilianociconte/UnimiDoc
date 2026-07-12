@@ -11037,3 +11037,49 @@ button.dashboard-stat:hover {
   cursor: pointer;
   text-decoration: underline;
 }
+
+/* --- Classifiche multi-segnale (sidebar esplora) --------------------------- */
+
+.rankings-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0 12px;
+}
+
+.rankings-tabs button {
+  border: 1px solid rgba(22, 104, 69, 0.18);
+  background: #fff;
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.rankings-tabs button.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.community-rankings .leaderboard-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-align: left;
+}
+
+.rankings-emerging {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(22, 104, 69, 0.16);
+}
+
+.rankings-emerging strong {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text-strong);
+  margin-bottom: 8px;
+}

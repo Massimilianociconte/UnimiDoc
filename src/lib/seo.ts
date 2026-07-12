@@ -246,13 +246,44 @@ export function uploaderRankJsonLd(
     '@context': 'https://schema.org',
     '@type': 'ItemList',
     name: 'Classifica autori UnimiDoc',
-    description: 'Gli autori di appunti più affidabili per Scienze Biologiche alla Statale di Milano.',
+    description:
+      'Gli autori più affidabili della community: punteggio bayesiano su qualità media dei materiali, recensioni, costanza qualitativa e fiducia (rimborsi e segnalazioni), non sul numero di caricamenti o vendite.',
     url: `${origin}/app`,
     itemListOrder: 'https://schema.org/ItemListOrderDescending',
     itemListElement: entries.map((entry, index) => ({
       '@type': 'ListItem',
       position: index + 1,
       item: { '@type': 'Person', name: entry.name },
+    })),
+  }
+}
+
+// Classifica materiali per SERP/AI Overview: la stessa graduatoria
+// multi-segnale mostrata agli utenti (recensioni bayesiane, qualità flashcard,
+// completezza, soddisfazione, freschezza), mai un ordinamento per sole vendite.
+export function rankedDocumentsJsonLd(
+  entries: Array<{ title: string; path: string; subject: string }>,
+  origin: string,
+): Record<string, unknown> {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    name: 'I migliori appunti su UnimiDoc',
+    description:
+      'Classifica multi-segnale dei materiali: valutazioni degli studenti, qualità didattica delle flashcard, completezza dei metadati, soddisfazione d’acquisto e aggiornamento.',
+    url: `${origin}/app`,
+    itemListOrder: 'https://schema.org/ItemListOrderDescending',
+    numberOfItems: entries.length,
+    itemListElement: entries.map((entry, index) => ({
+      '@type': 'ListItem',
+      position: index + 1,
+      url: `${origin}${entry.path}`,
+      item: {
+        '@type': 'LearningResource',
+        name: entry.title,
+        about: entry.subject,
+        url: `${origin}${entry.path}`,
+      },
     })),
   }
 }

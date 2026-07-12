@@ -192,6 +192,7 @@ import {
   setJsonLd,
   setMetaTag,
   slugify,
+  rankedDocumentsJsonLd,
   uploaderRankJsonLd,
 } from './lib/seo'
 import {
@@ -210,6 +211,12 @@ import {
   uniqueCourseNames,
   type DegreeCourse,
 } from './lib/degreeCatalog'
+import {
+  buildAuthorScores,
+  buildDocumentRankings,
+  emergingAuthors,
+  sortByRanking,
+} from './lib/ranking'
 import {
   loadNotificationPrefs,
   NOTIFICATION_CATEGORIES,
@@ -1644,46 +1651,30 @@ type UploaderRankEntry = {
   score: number
 }
 
-// Ranking multi-fattore: premia qualità, vendite, valutazioni, affidabilità e
-// costanza — non il semplice numero di documenti. I documenti oltre i primi
-// pesano meno (rendimento decrescente) così spammare upload non scala il punteggio.
+// Ranking multi-segnale (src/lib/ranking.ts, stesse formule delle viste
+// Postgres): medie bayesiane con soglia minima di campioni, costanza
+// qualitativa, fiducia (rimborsi/segnalazioni) e qualità didattica. Il volume
+// entra solo come confidenza — spammare upload o vendite non scala il punteggio.
 function buildUploaderRanking(documents: DocumentItem[]): UploaderRankEntry[] {
-  const byUploader = new Map<string, { name: string; sellerId?: string; documents: DocumentItem[] }>()
-  for (const document of documents.filter((item) => item.sellerPublic !== false)) {
-    const id = document.sellerId ?? `name:${document.uploader}`
-    const group = byUploader.get(id) ?? { name: document.uploader, sellerId: document.sellerId, documents: [] }
-    group.documents.push(document)
-    byUploader.set(id, group)
-  }
-
-  return Array.from(byUploader.entries())
-    .map(([id, group]) => {
-      const { name, sellerId, documents: docs } = group
-      const downloads = docs.reduce((total, doc) => total + doc.downloads, 0)
-      const quality = docs.reduce((total, doc) => total + doc.quality, 0) / docs.length
-      const flashcardQualityDocs = docs.filter((doc) => typeof doc.flashcardQualityPercent === 'number')
-      const flashcardQuality = flashcardQualityDocs.length
-        ? flashcardQualityDocs.reduce((total, doc) => total + (doc.flashcardQualityPercent ?? 0), 0) / flashcardQualityDocs.length
-        : 0
-      const trust = docs.reduce((total, doc) => total + doc.uploaderTrust, 0) / docs.length
-      const reports = docs.reduce((total, doc) => total + doc.reportCount, 0)
-      // Valutazione media 1–5 derivata dalla qualità (0–10); recensioni stimate
-      // come frazione dei download (proxy finché non c'è un sistema reale).
-      const rating = Math.round((quality / 2) * 10) / 10
-      const reviews = Math.round(downloads * 0.18)
-      const consistency = Math.min(docs.length, 6) // rendimento decrescente
-      const reliability = trust - reports * 4 // le segnalazioni erodono l'affidabilità
-      const score = Math.round(
-        Math.sqrt(downloads) * 6 + // vendite (sub-lineare)
-          quality * 8 + // qualità media
-          rating * 10 + // valutazioni
-          flashcardQuality * 0.45 + // qualità didattica delle flashcard generate
-          reliability + // affidabilità
-          consistency * 5, // costanza
-      )
-      return { id, name, sellerId, documents: docs.length, downloads, quality, trust, rating, reviews, reports, flashcardQuality, score: Math.max(0, score) }
-    })
-    .sort((a, b) => b.score - a.score)
+  return buildAuthorScores(documents).map((author) => {
+    const docs = documents.filter((doc) =>
+      author.sellerId ? doc.sellerId === author.sellerId : !doc.sellerId && doc.uploader === author.name,
+    )
+    return {
+      id: author.id,
+      name: author.name,
+      sellerId: author.sellerId,
+      documents: author.documents,
+      downloads: author.totalDownloads,
+      quality: author.avgDocScore / 10,
+      trust: Math.round(author.trustRate * 100),
+      rating: author.avgRating,
+      reviews: docs.reduce((total, doc) => total + (doc.flashcardQualityVotes ?? 0), 0),
+      reports: docs.reduce((total, doc) => total + doc.reportCount, 0),
+      flashcardQuality: author.flashcard * 100,
+      score: Math.round(author.reliability),
+    }
+  })
 }
 
 function authorSlug(name: string): string {
@@ -1715,8 +1706,8 @@ function UploaderLeaderboard({ documents, onOpenProfile }: { documents: Document
       <div className="leaderboard-head">
         <span className="leaderboard-icon"><Trophy size={18} /></span>
         <div>
-          <h2>Classifica autori</h2>
-          <p>Qualità, vendite, valutazioni e affidabilità nel tempo: chi pubblica meglio sale e vende di più.</p>
+          <h2>Autori più affidabili</h2>
+          <p>Punteggio bayesiano su qualità media, costanza, recensioni e fiducia: pochi materiali eccellenti battono tanti upload mediocri.</p>
         </div>
       </div>
       <ol className="leaderboard-list">
@@ -1731,6 +1722,85 @@ function UploaderLeaderboard({ documents, onOpenProfile }: { documents: Document
           </li>
         ))}
       </ol>
+    </section>
+  )
+}
+
+// Classifiche multi-segnale della community: complessiva, trend recente e
+// qualità didattica per i materiali, più gli autori emergenti. Stesse formule
+// bayesiane del backend (src/lib/ranking.ts): niente classifiche da contatore.
+function CommunityRankings({
+  documents,
+  onOpenDocument,
+  onOpenProfile,
+}: {
+  documents: DocumentItem[]
+  onOpenDocument: (document: DocumentItem) => void
+  onOpenProfile: (name: string, sellerId?: string) => void
+}) {
+  const [tab, setTab] = useState<'overall' | 'recent' | 'didactic'>('overall')
+  const rankings = useMemo(() => buildDocumentRankings(documents, 5), [documents])
+  const emerging = useMemo(() => emergingAuthors(documents, 3), [documents])
+  const list = tab === 'overall' ? rankings.overall : tab === 'recent' ? rankings.recent : rankings.didactic
+  if (!list.length) return null
+
+  const TABS = [
+    { key: 'overall' as const, label: 'Migliori' },
+    { key: 'recent' as const, label: 'Di tendenza' },
+    { key: 'didactic' as const, label: 'Qualità didattica' },
+  ]
+
+  return (
+    <section className="leaderboard-section community-rankings" aria-label="Classifiche dei materiali">
+      <div className="leaderboard-head">
+        <span className="leaderboard-icon"><Star size={18} /></span>
+        <div>
+          <h2>Classifiche materiali</h2>
+          <p>Recensioni, flashcard utili, completezza, soddisfazione e aggiornamento — non solo vendite.</p>
+        </div>
+      </div>
+      <div className="rankings-tabs" role="tablist">
+        {TABS.map(({ key, label }) => (
+          <button
+            aria-selected={tab === key}
+            className={tab === key ? 'active' : ''}
+            key={key}
+            onClick={() => setTab(key)}
+            role="tab"
+            type="button"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <ol className="leaderboard-list">
+        {list.map(({ document, score }, index) => (
+          <li key={document.id}>
+            <span className={`leaderboard-rank rank-${index + 1}`}>{index + 1}</span>
+            <div>
+              <button className="leaderboard-name" onClick={() => onOpenDocument(document)} type="button">
+                {document.title}
+              </button>
+              <small>
+                {document.subject} · {document.professor}
+              </small>
+            </div>
+            <em>{Math.round(tab === 'overall' ? score.overall : tab === 'recent' ? score.recent : score.didactic)} pt</em>
+          </li>
+        ))}
+      </ol>
+      {emerging.length ? (
+        <div className="rankings-emerging">
+          <strong>Autori emergenti</strong>
+          <div className="professor-suggestion-chips">
+            {emerging.map((author) => (
+              <button key={author.id} onClick={() => onOpenProfile(author.name, author.sellerId)} type="button">
+                {author.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }
@@ -1848,7 +1918,8 @@ function DocumentPage({
   }
 
   const course = findCourse(doc.subject)
-  const related = documents.filter((item) => item.subject === doc.subject && item.id !== doc.id).slice(0, 3)
+  // Correlati: stessa materia, ordinati per punteggio multi-segnale.
+  const related = sortByRanking(documents.filter((item) => item.subject === doc.subject && item.id !== doc.id)).slice(0, 3)
   const price = effectiveDocumentPrice(doc)
   const insights = doc.insights
   const courseMeta = documentCourseMeta(doc)
@@ -2066,13 +2137,17 @@ function AppHome({
       .filter((group) => group.professors.length > 0)
   }, [activeSubject, documents])
 
+  // Listing ordinato per punteggio multi-segnale: con i filtri attivi diventa
+  // di fatto la classifica per materia/docente richiesta dalla query.
   const visibleDocuments = useMemo(
     () =>
-      documents.filter(
-        (document) =>
-          (activeSubject === 'Tutti' || document.subject === activeSubject) &&
-          (activeProfessor === 'Tutti' || document.professor === activeProfessor) &&
-          (!activeQuery || documentMatchesQuery(document, activeQuery)),
+      sortByRanking(
+        documents.filter(
+          (document) =>
+            (activeSubject === 'Tutti' || document.subject === activeSubject) &&
+            (activeProfessor === 'Tutti' || document.professor === activeProfessor) &&
+            (!activeQuery || documentMatchesQuery(document, activeQuery)),
+        ),
       ),
     [activeSubject, activeProfessor, activeQuery, documents],
   )
@@ -2234,6 +2309,7 @@ function AppHome({
           )}
         </div>
         <aside className="study-sidebar">
+          <CommunityRankings documents={documents} onOpenDocument={onOpenDocument} onOpenProfile={onOpenProfile} />
           <UploaderLeaderboard documents={documents} onOpenProfile={onOpenProfile} />
           <section className="upload-panel">
             <img src={uploadBackpack} alt="Carica appunti" />
@@ -8152,8 +8228,20 @@ function App() {
 
     if (route === 'app') {
       setJsonLd('ranking', uploaderRankJsonLd(buildUploaderRanking(visibleDocuments).slice(0, 5), window.location.origin))
+      setJsonLd(
+        'rankingDocs',
+        rankedDocumentsJsonLd(
+          buildDocumentRankings(visibleDocuments, 10).overall.map(({ document }) => ({
+            title: document.title,
+            path: documentPath(document),
+            subject: document.subject,
+          })),
+          window.location.origin,
+        ),
+      )
     } else {
       setJsonLd('ranking', null)
+      setJsonLd('rankingDocs', null)
     }
 
     // Pagine corsi di laurea: markup Course / ItemList per SERP e AI Overview.
