@@ -208,6 +208,8 @@ export function submitSrsReview(payload: {
 export function createDocumentUpload(payload: {
   title: string
   courseName: string
+  degreeSlug?: string
+  degreeCourse?: string
   originalFileSha256: string
   originalSizeBytes: number
   mimeType?: string

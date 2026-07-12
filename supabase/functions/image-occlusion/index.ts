@@ -83,8 +83,9 @@ const round = (n: number) => Math.round(n * 1000) / 1000
     const { id: userId } = await requireUser(req)
     const admin = adminClient()
     await requirePremium(admin, userId)
-    await enforceRateLimit(admin, userId, 'image_occlusion', config.limits.geminiPerMonth)
 
+    // Validate the payload BEFORE spending rate-limit quota: a malformed
+    // request must never consume the user's monthly budget.
     const body = await req.json().catch(() => null)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
     const imageBase64 = String(body.imageBase64 ?? '')
@@ -95,6 +96,8 @@ const round = (n: number) => Math.round(n * 1000) / 1000
     if (!ALLOWED_IMAGE_MIME.has(mimeType)) throw errors.badRequest('mimeType non supportato: usa image/png, image/jpeg o image/webp.')
     const language = String(body.language ?? 'it')
     const pageNumber = body.pageNumber ?? null
+
+    await enforceRateLimit(admin, userId, 'image_occlusion', config.limits.geminiPerMonth)
 
     const imageHash = await sha256Hex(imageBase64)
     const key = await cacheKey(['gemini', config.gemini.model, config.promptVersions.imageOcclusion, 'image_occlusion', language, imageHash])

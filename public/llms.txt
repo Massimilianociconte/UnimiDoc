@@ -1,16 +1,22 @@
 # UnimiDoc
 
-> Piattaforma indipendente di appunti verificati per il corso di laurea in Scienze
-> Biologiche (L-13) all'Università degli Studi di Milano ("La Statale"). Gli studenti
-> caricano dispense, schemi, esercizi svolti e domande d'esame; la community li
-> verifica e li valuta. Ogni documento ha una scheda pubblica dedicata con materia,
-> docente, anno accademico, numero di pagine e valutazione.
+> Piattaforma indipendente di appunti verificati per i corsi di laurea triennale
+> dell'Università degli Studi di Milano ("La Statale"). Gli studenti caricano
+> dispense, schemi, esercizi svolti e domande d'esame; la community li verifica e
+> li valuta. Ogni documento ha una scheda pubblica dedicata con materia, docente,
+> anno accademico, numero di pagine e valutazione. 67 dei 72 corsi triennali
+> della Statale hanno il catalogo completo del piano di studi con materie
+> (anno, CFU, SSD) e docenti ufficiali da unimi.it; i restanti 5 (interatenei
+> con sede amministrativa altrove e professioni sanitarie senza piano
+> pubblicato) accettano caricamenti con materia e docente indicati dallo
+> studente.
 
 UnimiDoc non è affiliata con l'Università degli Studi di Milano.
 
 ## Pagine principali
 
 - [Esplora appunti](https://unimidoc.netlify.app/app): catalogo filtrabile per materia e docente
+- [Corsi di laurea](https://unimidoc.netlify.app/corsi): tutti i 72 corsi triennali della Statale, per area disciplinare
 - [Premium](https://unimidoc.netlify.app/premium): anteprime complete e download senza attese
 - [Carica appunti](https://unimidoc.netlify.app/upload): upload con revisione e crediti di ricompensa
 - [Privacy](https://unimidoc.netlify.app/privacy): dati, finalità, conservazione e diritti
@@ -24,8 +30,21 @@ Ogni documento vive su un URL proprio con schema
 `https://unimidoc.netlify.app/appunti/{materia}/{titolo}` e markup Schema.org
 LearningResource (materia, docente, ateneo, valutazioni, download).
 
+## Corsi di laurea
+
+Ogni corso di laurea triennale della Statale ha una pagina dedicata con schema
+`https://unimidoc.netlify.app/corsi/{slug}` e markup Schema.org Course (nome,
+classe di laurea, ateneo). Aree coperte: Scienze e tecnologie (Informatica,
+Fisica, Matematica, Chimica, Biotecnologia, Scienze biologiche, ...), Medicina e
+professioni sanitarie (Infermieristica, Fisioterapia, Ostetricia, ...), Agraria e
+alimentare, Farmacia, Studi umanistici (Lettere, Storia, Filosofia, Lingue, ...),
+Giurisprudenza, Economia, politica e società (EMA, SPO, SIE, CES, ...).
+
 ## Materie coperte
 
+Ogni pagina corso elenca il piano di studi ufficiale (2.700+ insegnamenti in
+totale, con anno, CFU, SSD e lingua) e oltre 2.000 docenti titolari ricavati
+dall'edizione attiva più recente su unimi.it. Per Scienze Biologiche L-13:
 Genetica, Microbiologia generale, Chimica biologica, Citologia e istologia,
-Fisiologia, Biologia cellulare, Anatomia umana e le altre materie del piano di
-studi L-13 della Statale di Milano.
+Fisiologia, Biologia molecolare, Anatomia comparata e le altre materie del
+piano di studi, ciascuna con i docenti dell'edizione 2025/26.

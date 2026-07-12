@@ -1,4 +1,5 @@
 import { findCourse } from '../courseCatalog'
+import { DEGREE_PROGRAMS, degreeProgramPath, type DegreeProgram } from '../degreePrograms'
 import type { DocumentItem } from '../data'
 
 // Ogni documento vive su un URL proprio (/appunti/:materia/:titolo) così Google,
@@ -177,6 +178,63 @@ function universityJsonLd(): Record<string, unknown> {
     name: 'Università degli Studi di Milano',
     alternateName: 'La Statale',
     sameAs: 'https://www.unimi.it',
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pagine corso di laurea (/corsi e /corsi/:slug): ogni CdL della Statale ha un
+// URL indicizzabile con title/description dedicati e markup Schema.org Course,
+// così le query "appunti <corso> statale milano" trovano una pagina specifica.
+// ---------------------------------------------------------------------------
+
+export function degreeSeoTitle(program: DegreeProgram): string {
+  return `Appunti ${program.name} (${program.classe}) · Statale di Milano | UnimiDoc`
+}
+
+export function degreeSeoDescription(program: DegreeProgram): string {
+  const detail = program.catalogReady
+    ? 'Catalogo completo di materie e docenti del piano di studi, con dispense, schemi ed esercizi verificati dalla community.'
+    : 'Carica e trova dispense, riassunti, schemi ed esercizi condivisi dagli studenti del corso, verificati prima della pubblicazione.'
+  return (
+    `Appunti per ${program.name} (classe ${program.classe}), laurea triennale` +
+    `${program.interateneo ? ` interateneo (${program.interateneo})` : ''} dell'Università degli Studi di Milano. ${detail}`
+  ).slice(0, 300)
+}
+
+export function degreeJsonLd(program: DegreeProgram, url: string): Record<string, unknown> {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Course',
+    '@id': url,
+    url,
+    name: program.name,
+    courseCode: program.classe,
+    description: degreeSeoDescription(program),
+    inLanguage: 'it',
+    educationalLevel: 'Laurea triennale',
+    provider: {
+      '@type': 'CollegeOrUniversity',
+      name: 'Università degli Studi di Milano',
+      alternateName: 'La Statale',
+      sameAs: `https://www.unimi.it${program.unimiPath}`,
+    },
+  }
+}
+
+export function degreeCatalogJsonLd(origin: string): Record<string, unknown> {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    name: 'Corsi di laurea triennale — Università degli Studi di Milano',
+    description: 'Tutti i corsi di laurea triennale della Statale di Milano coperti da UnimiDoc.',
+    url: `${origin}/corsi`,
+    numberOfItems: DEGREE_PROGRAMS.length,
+    itemListElement: DEGREE_PROGRAMS.map((program, index) => ({
+      '@type': 'ListItem',
+      position: index + 1,
+      name: `${program.name} (${program.classe})`,
+      url: `${origin}${degreeProgramPath(program)}`,
+    })),
   }
 }
 

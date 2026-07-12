@@ -13,6 +13,11 @@ import { adminClient, requireUser } from '../_shared/supabase.ts'
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const HASH_RE = /^[a-f0-9]{64}$/i
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const DEGREE_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+// Historic default: every document uploaded before the multi-degree registry
+// belongs to Scienze biologiche (L-13), so clients that omit degreeSlug keep
+// the old behaviour.
+const DEFAULT_DEGREE_SLUG = 'scienze-biologiche'
 // Anti-abuse: draft creation mints signed upload URLs, so cap how many drafts a
 // single account can open per hour. Jobs are queued only after byte validation.
 const MAX_UPLOADS_PER_HOUR = 20
@@ -182,6 +187,18 @@ async function cancelUpload(admin: any, userId: string, body: Record<string, unk
       throw errors.badRequest('Carica un PDF. I file Word devono essere convertiti in PDF prima del salvataggio.')
     }
 
+    // Il CdL è una FK verso public.degree_programs: va validato qui per dare un
+    // errore leggibile invece di un errore di vincolo al momento dell'insert.
+    const degreeSlug = clean(body.degreeSlug).toLowerCase().slice(0, 80) || DEFAULT_DEGREE_SLUG
+    if (!DEGREE_SLUG_RE.test(degreeSlug)) throw errors.badRequest('Corso di laurea non valido.')
+    const { data: degree, error: degreeError } = await admin
+      .from('degree_programs')
+      .select('slug, name, classe, is_active')
+      .eq('slug', degreeSlug)
+      .maybeSingle()
+    if (degreeError) throw errors.badRequest(`Verifica corso di laurea non riuscita: ${degreeError.message}`)
+    if (!degree || degree.is_active !== true) throw errors.badRequest('Corso di laurea sconosciuto o non più attivo.')
+
     const hourAgo = new Date(Date.now() - 3_600_000).toISOString()
     const recent = await admin
       .from('documents')
@@ -203,6 +220,7 @@ async function cancelUpload(admin: any, userId: string, body: Record<string, unk
       owner_id: userId,
       title,
       course_name: courseName,
+      degree_slug: degree.slug,
       professor: clean(body.professor).slice(0, 120) || null,
       academic_year: clean(body.academicYear, '2025/2026').slice(0, 20) || null,
       original_file_sha256: originalFileSha256,
@@ -225,6 +243,7 @@ async function cancelUpload(admin: any, userId: string, body: Record<string, unk
         original_file_name: fileName,
         source_mime_type: mimeType,
         submitted_from: 'document-upload',
+        degree_course: clean(body.degreeCourse).slice(0, 160) || `${degree.name} ${degree.classe}`,
       },
     })
     if (insertError) {

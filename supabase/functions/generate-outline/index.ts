@@ -120,8 +120,9 @@ function sanitizeOutline(
     const { id: userId } = await requireUser(req)
     const admin = adminClient()
     await requirePremium(admin, userId)
-    await enforceRateLimit(admin, userId, 'outline', config.limits.outlineRefinementsPerMonth)
 
+    // Validate the payload BEFORE spending rate-limit quota: a malformed
+    // request must never consume the user's monthly budget.
     const body = await req.json().catch(() => null)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
 
@@ -130,6 +131,8 @@ function sanitizeOutline(
     const documentId = clean((body as Record<string, unknown>).documentId).slice(0, 128) || null
     const candidates = sanitizeCandidates((body as Record<string, unknown>).candidates, config.limits.maxOutlineCandidates)
     if (candidates.length < 3) throw errors.badRequest('Servono almeno 3 candidati verificabili per rifinire l’indice.')
+
+    await enforceRateLimit(admin, userId, 'outline', config.limits.outlineRefinementsPerMonth)
 
     const key = await cacheKey([
       'deepseek',

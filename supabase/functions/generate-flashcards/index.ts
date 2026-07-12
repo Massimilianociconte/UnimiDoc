@@ -89,16 +89,19 @@ function sanitizeCards(cards: GeneratedCard[], max: number): GeneratedCard[] {
       return await saveReviewedFromUpload(req, admin, userId, body)
     }
 
-    await enforceRateLimit(admin, userId, 'flashcards', config.limits.aiHelpsPerMonth)
-
     // --- Modalità RAG: chunk scelti dal server via embedding -----------------
     if (body.fromDocument === true) {
+      await enforceRateLimit(admin, userId, 'flashcards', config.limits.aiHelpsPerMonth)
       return await generateFromDocument(req, admin, userId, body)
     }
 
+    // Validate the payload BEFORE spending rate-limit quota: a malformed
+    // request must never consume the user's monthly budget.
     const chunkText = String(body.chunkText ?? '').trim()
     if (chunkText.length < 40) throw errors.badRequest('chunkText troppo corto per generare flashcard.')
     if (chunkText.length > 50_000) throw errors.badRequest('chunkText troppo lungo per una singola generazione.')
+
+    await enforceRateLimit(admin, userId, 'flashcards', config.limits.aiHelpsPerMonth)
 
     const language = String(body.language ?? 'it')
     const maxCards = Math.min(Number(body.maxCards ?? 12) || 12, config.limits.maxCardsPerGeneration)

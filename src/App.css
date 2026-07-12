@@ -2908,6 +2908,14 @@ button {
   grid-column: span 3;
 }
 
+.form-grid.refined .field-full {
+  grid-column: 1 / -1;
+}
+
+.teacher-picker-row.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 /* Fieldset 3 (Presentazione): textarea + tag input are long fields, so give
    each the full row instead of splitting 50/50 like the identity fields. */
 .form-grid.refined.fieldset-stacked .field-wide {
@@ -6300,6 +6308,312 @@ button {
 
 .library-summary span {
   color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ */
+/* Directory corsi di laurea: ricerca + aree richiudibili, compatta.   */
+/* ------------------------------------------------------------------ */
+
+.degree-directory-band {
+  display: grid;
+  gap: 20px;
+  padding: 48px 0 56px;
+}
+
+.degree-directory-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.degree-directory-head h2 {
+  margin: 0 0 8px;
+  color: var(--text-strong);
+  font-size: clamp(26px, 3vw, 34px);
+}
+
+.degree-directory-head p {
+  max-width: 640px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 10px 16px;
+  color: var(--primary-dark);
+  background: #fff;
+  font-weight: 850;
+}
+
+.ghost-button:hover {
+  border-color: rgba(22, 104, 69, 0.35);
+  background: #f2faf5;
+}
+
+.degree-directory {
+  display: grid;
+  gap: 14px;
+}
+
+.degree-directory-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0 14px;
+  background: #fff;
+}
+
+.degree-directory-search svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.degree-directory-search input {
+  width: 100%;
+  height: 48px;
+  border: 0;
+  outline: 0;
+  color: var(--text-strong);
+  background: transparent;
+  font: inherit;
+}
+
+.degree-directory-empty {
+  margin: 0;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  color: var(--muted);
+  background: #fff;
+}
+
+.degree-area-list {
+  display: grid;
+  gap: 10px;
+}
+
+.degree-area {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.degree-area summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  color: var(--text-strong);
+  font-weight: 900;
+  cursor: pointer;
+  list-style: none;
+}
+
+.degree-area summary::-webkit-details-marker {
+  display: none;
+}
+
+.degree-area summary::after {
+  content: '+';
+  color: var(--primary);
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.degree-area[open] summary::after {
+  content: '−';
+}
+
+.degree-area summary em {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.degree-area[open] summary {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.degree-area .degree-chip-grid {
+  padding: 14px 16px 16px;
+}
+
+.degree-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.degree-chip {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 11px 13px;
+  background: #fff;
+  text-decoration: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.degree-chip:hover {
+  border-color: rgba(22, 104, 69, 0.4);
+  box-shadow: 0 8px 22px rgba(16, 24, 40, 0.07);
+  transform: translateY(-1px);
+}
+
+.degree-chip strong {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: var(--text-strong);
+  font-size: 13.5px;
+  line-height: 1.3;
+}
+
+.degree-chip span {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 750;
+}
+
+.degree-chip.ready span {
+  color: var(--primary-dark);
+}
+
+/* Pagine /corsi e /corsi/:slug */
+.degree-page {
+  display: grid;
+  gap: 26px;
+  padding: 44px 0 72px;
+}
+
+.degree-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.degree-breadcrumb button {
+  border: 0;
+  padding: 0;
+  color: var(--primary);
+  background: none;
+  font: inherit;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.degree-page-hero {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.degree-page-hero h1 {
+  max-width: 860px;
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(30px, 4vw, 48px);
+  line-height: 1.05;
+}
+
+.degree-page-lead {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+.degree-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.degree-secondary-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 12px 18px;
+  color: var(--primary-dark);
+  background: #fff;
+  font-weight: 850;
+}
+
+.degree-coming-soon {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  border: 1px solid rgba(22, 104, 69, 0.14);
+  border-radius: 14px;
+  padding: 18px;
+  background: linear-gradient(135deg, #fbfffc, #fffdf7);
+}
+
+.degree-coming-soon svg {
+  margin-top: 2px;
+  color: var(--primary);
+}
+
+.degree-coming-soon strong {
+  display: block;
+  color: var(--text-strong);
+}
+
+.degree-coming-soon p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.degree-coming-soon a {
+  color: var(--primary);
+  font-weight: 800;
+}
+
+.degree-page-footer {
+  display: flex;
+  justify-content: center;
+}
+
+@media (max-width: 900px) {
+  .degree-chip-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .degree-directory-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .degree-chip-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .dashboard-hero {
@@ -10563,4 +10877,163 @@ button.dashboard-stat:hover {
   .legal-operator-card { grid-template-columns: minmax(0, 1fr); }
   .legal-config-warning { align-items: flex-start; }
   .site-footer nav { gap: 10px 14px; }
+}
+
+/* --- Catalogo materie+docenti da DB sulle pagine /corsi/:slug ------------- */
+
+.degree-catalog-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 22px;
+  color: var(--text-soft);
+  border: 1px dashed rgba(22, 104, 69, 0.22);
+  border-radius: 14px;
+}
+
+.degree-catalog {
+  display: grid;
+  gap: 14px;
+}
+
+.degree-catalog-head h2 {
+  margin: 0 0 6px;
+  font-size: 1.24rem;
+  color: var(--text-strong);
+}
+
+.degree-catalog-head p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.92rem;
+  max-width: 70ch;
+}
+
+.degree-catalog-head a {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.degree-catalog-curriculum h3 {
+  margin: 10px 0 8px;
+  font-size: 1rem;
+  color: var(--text-strong);
+}
+
+.degree-catalog-year {
+  border: 1px solid rgba(22, 104, 69, 0.14);
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.degree-catalog-year + .degree-catalog-year {
+  margin-top: 10px;
+}
+
+.degree-catalog-year summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px;
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--text-strong);
+  list-style: none;
+}
+
+.degree-catalog-year summary::-webkit-details-marker {
+  display: none;
+}
+
+.degree-catalog-year[open] summary {
+  border-bottom: 1px solid rgba(22, 104, 69, 0.1);
+}
+
+.degree-catalog-count {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-soft);
+  background: rgba(22, 104, 69, 0.07);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.degree-catalog ul {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+}
+
+.degree-catalog li button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.degree-catalog li button:hover,
+.degree-catalog li button:focus-visible {
+  background: rgba(22, 104, 69, 0.06);
+}
+
+.degree-catalog-course {
+  display: block;
+  min-width: 0;
+  color: var(--text-strong);
+  font-weight: 600;
+  font-size: 0.94rem;
+}
+
+.degree-catalog-course small {
+  display: block;
+  margin-top: 1px;
+  color: var(--text-soft);
+  font-weight: 500;
+  font-size: 0.78rem;
+}
+
+.degree-catalog-teachers {
+  min-width: 0;
+  color: var(--primary);
+  font-size: 0.84rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.degree-catalog-teachers.muted {
+  color: var(--text-soft);
+  font-weight: 500;
+}
+
+@media (max-width: 640px) {
+  .degree-catalog li button {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Link testuale per passare a materia libera nel form upload */
+.linklike-button {
+  margin-top: 6px;
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
 }

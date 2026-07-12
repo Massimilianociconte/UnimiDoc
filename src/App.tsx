@@ -178,6 +178,10 @@ import {
 } from './lib/creditsWallet'
 import {
   breadcrumbJsonLd,
+  degreeCatalogJsonLd,
+  degreeJsonLd,
+  degreeSeoDescription,
+  degreeSeoTitle,
   documentCourseMeta,
   documentJsonLd,
   documentMatchesQuery,
@@ -190,6 +194,22 @@ import {
   slugify,
   uploaderRankJsonLd,
 } from './lib/seo'
+import {
+  DEFAULT_DEGREE_SLUG,
+  DEGREE_PROGRAMS,
+  degreeCourseLabel,
+  degreeProgramPath,
+  degreeProgramsByArea,
+  findDegreeByPath,
+  findDegreeProgram,
+  type DegreeProgram,
+} from './degreePrograms'
+import {
+  groupDegreeCatalog,
+  loadDegreeCatalog,
+  uniqueCourseNames,
+  type DegreeCourse,
+} from './lib/degreeCatalog'
 import {
   loadNotificationPrefs,
   NOTIFICATION_CATEGORIES,
@@ -212,7 +232,7 @@ const BillingPlans = lazy(() => import('./components/BillingPlans').then((module
 const LegalPage = lazy(() => import('./components/LegalPage').then((module) => ({ default: module.LegalPage })))
 const SellerPayoutPanel = lazy(() => import('./components/SellerPayoutPanel').then((module) => ({ default: module.SellerPayoutPanel })))
 
-type Route = 'landing' | 'login' | 'signup' | 'app' | 'premium' | 'upload' | 'library' | 'dashboard' | 'settings' | 'document' | 'profile' | LegalRoute
+type Route = 'landing' | 'login' | 'signup' | 'app' | 'premium' | 'upload' | 'library' | 'dashboard' | 'settings' | 'document' | 'profile' | 'degrees' | 'degree' | LegalRoute
 type AuthMode = 'login' | 'signup'
 type AuthProvider = 'email' | 'google'
 
@@ -295,6 +315,8 @@ const routePaths: Record<Route, string> = {
   settings: '/impostazioni',
   document: '/appunti',
   profile: '/autore',
+  degrees: '/corsi',
+  degree: '/corsi',
   privacy: '/privacy',
   terms: '/termini',
   cookies: '/cookie',
@@ -348,6 +370,15 @@ const routeSeo: Record<Route, { title: string; description: string }> = {
   profile: {
     title: 'Profilo autore - UnimiDoc',
     description: 'Profilo pubblico di un autore UnimiDoc: materiali, valutazioni, vendite e affidabilità per Scienze Biologiche L-13.',
+  },
+  degrees: {
+    title: 'Corsi di laurea triennale della Statale di Milano - UnimiDoc',
+    description:
+      'Tutti i corsi di laurea triennale dell’Università degli Studi di Milano su UnimiDoc: trova o carica appunti per il tuo corso, dalla biologia all’informatica alle professioni sanitarie.',
+  },
+  degree: {
+    title: 'Appunti per corso di laurea - UnimiDoc',
+    description: 'Appunti, dispense ed esercizi per i corsi di laurea triennale della Statale di Milano.',
   },
   privacy: {
     title: 'Informativa privacy - UnimiDoc',
@@ -414,6 +445,8 @@ function routeFromPathname(pathname: string): Route {
   if (pathname === '/copyright-segnalazioni' || pathname === '/segnalazioni') return 'copyright'
   if (pathname.startsWith('/appunti/')) return 'document'
   if (pathname.startsWith('/autore/')) return 'profile'
+  if (pathname === '/corsi' || pathname === '/corsi-di-laurea') return 'degrees'
+  if (pathname.startsWith('/corsi/')) return 'degree'
   return 'landing'
 }
 
@@ -1029,16 +1062,296 @@ function SubjectsShowcase({ onExploreSubject }: { onExploreSubject: (value: stri
   )
 }
 
+// ---------------------------------------------------------------------------
+// Directory dei corsi di laurea triennale della Statale: ricerca istantanea +
+// aree richiudibili, così 72 corsi restano compatti invece di allungare la
+// pagina. Ogni corso apre la sua pagina dedicata /corsi/:slug.
+// ---------------------------------------------------------------------------
+function DegreeDirectory({ compact, onOpenDegree }: { compact?: boolean; onOpenDegree: (program: DegreeProgram) => void }) {
+  const [query, setQuery] = useState('')
+  const normalized = slugify(query)
+  const matches = (program: DegreeProgram) =>
+    !normalized || slugify(`${program.name} ${program.classe} ${program.area}`).includes(normalized)
+  const grouped = degreeProgramsByArea()
+  const searching = normalized.length > 0
+  const results = searching ? DEGREE_PROGRAMS.filter(matches) : []
+
+  return (
+    <div className="degree-directory">
+      <label className="degree-directory-search">
+        <Search size={16} />
+        <input
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Cerca il tuo corso di laurea (es. Informatica, Fisioterapia, Lettere)"
+          type="search"
+          value={query}
+        />
+      </label>
+
+      {searching ? (
+        results.length ? (
+          <div className="degree-chip-grid" role="list">
+            {results.map((program) => (
+              <DegreeChip key={program.slug} program={program} onOpenDegree={onOpenDegree} />
+            ))}
+          </div>
+        ) : (
+          <p className="degree-directory-empty">
+            Nessun corso trovato per “{query}”. Controlla l’ortografia o sfoglia le aree qui sotto.
+          </p>
+        )
+      ) : (
+        <div className="degree-area-list">
+          {grouped.map(({ area, programs }, index) => (
+            <details className="degree-area" key={area} open={!compact && index === 0}>
+              <summary>
+                <span>{area}</span>
+                <em>{programs.length} corsi</em>
+              </summary>
+              <div className="degree-chip-grid" role="list">
+                {programs.map((program) => (
+                  <DegreeChip key={program.slug} program={program} onOpenDegree={onOpenDegree} />
+                ))}
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DegreeChip({ program, onOpenDegree }: { program: DegreeProgram; onOpenDegree: (program: DegreeProgram) => void }) {
+  return (
+    <a
+      className={`degree-chip ${program.catalogReady ? 'ready' : ''}`}
+      href={degreeProgramPath(program)}
+      onClick={(event) => {
+        event.preventDefault()
+        onOpenDegree(program)
+      }}
+      role="listitem"
+    >
+      <strong>{program.name}</strong>
+      <span>
+        {program.classe}
+        {program.catalogReady ? ' · catalogo completo' : ''}
+        {program.activeFrom ? ` · dal ${program.activeFrom}` : ''}
+      </span>
+    </a>
+  )
+}
+
+function DegreeCatalogPage({
+  onOpenDegree,
+  onRoute,
+}: {
+  onOpenDegree: (program: DegreeProgram) => void
+  onRoute: (route: Route) => void
+}) {
+  return (
+    <main className="degree-page section-wrap">
+      <header className="degree-page-hero">
+        <p className="dashboard-kicker"><GraduationCap size={15} /> Corsi di laurea</p>
+        <h1>I corsi di laurea triennale della Statale di Milano</h1>
+        <p className="degree-page-lead">
+          {DEGREE_PROGRAMS.length} corsi triennali attivi (offerta 2025/26, fonte unimi.it). Scienze biologiche ha
+          già il catalogo completo di materie e docenti; per gli altri corsi puoi caricare appunti indicando materia
+          e docente, e il catalogo dettagliato arriverà progressivamente.
+        </p>
+      </header>
+      <DegreeDirectory onOpenDegree={onOpenDegree} />
+      <footer className="degree-page-footer">
+        <button className="primary-action" onClick={() => onRoute('upload')} type="button">
+          <Upload size={17} /> Carica appunti per il tuo corso
+        </button>
+      </footer>
+    </main>
+  )
+}
+
+function DegreeProgramPage({
+  program,
+  onExploreSubject,
+  onOpenDegree,
+  onRoute,
+}: {
+  program: DegreeProgram | null
+  onExploreSubject: (value: string) => void
+  onOpenDegree: (program: DegreeProgram) => void
+  onRoute: (route: Route) => void
+}) {
+  if (!program) {
+    return (
+      <main className="degree-page section-wrap">
+        <header className="degree-page-hero">
+          <h1>Corso non trovato</h1>
+          <p className="degree-page-lead">Il corso che cerchi non esiste o non è più attivo. Sfoglia il catalogo completo.</p>
+        </header>
+        <DegreeDirectory onOpenDegree={onOpenDegree} />
+      </main>
+    )
+  }
+
+  return (
+    <main className="degree-page section-wrap">
+      <nav aria-label="Percorso" className="degree-breadcrumb">
+        <button onClick={() => onRoute('degrees')} type="button">Corsi di laurea</button>
+        <ChevronRight size={13} />
+        <span>{program.name}</span>
+      </nav>
+      <header className="degree-page-hero">
+        <p className="dashboard-kicker"><GraduationCap size={15} /> {program.area}</p>
+        <h1>Appunti per {program.name}</h1>
+        <p className="degree-page-lead">
+          Laurea triennale, classe {program.classe}
+          {program.interateneo ? ` · interateneo con ${program.interateneo}` : ''}
+          {program.activeFrom ? ` · attivo dall’a.a. ${program.activeFrom}` : ''} — Università degli Studi di
+          Milano. Dispense, riassunti, schemi ed esercizi caricati dagli studenti e verificati prima della
+          pubblicazione.
+        </p>
+        <div className="degree-page-actions">
+          <button className="primary-action" onClick={() => onRoute('upload')} type="button">
+            <Upload size={17} /> Carica appunti
+          </button>
+          <button className="degree-secondary-action" onClick={() => onRoute('app')} type="button">
+            <Search size={16} /> Esplora i materiali
+          </button>
+        </div>
+      </header>
+
+      {program.slug === DEFAULT_DEGREE_SLUG ? (
+        <SubjectsShowcase onExploreSubject={onExploreSubject} />
+      ) : (
+        <DegreeCourseCatalog program={program} onExploreSubject={onExploreSubject} />
+      )}
+    </main>
+  )
+}
+
+function DegreeCatalogComingSoon({ program }: { program: DegreeProgram }) {
+  return (
+    <section className="degree-coming-soon">
+      <BookOpen size={20} />
+      <div>
+        <strong>Catalogo materie e docenti in preparazione</strong>
+        <p>
+          Per {program.name} puoi già caricare e cercare appunti indicando materia e docente. Il piano di studi di
+          questo corso non è pubblicato su unimi.it (corsi interateneo o delle professioni sanitarie): consulta la
+          fonte ufficiale{' '}
+          <a href={`https://www.unimi.it${program.unimiPath}`} rel="noreferrer" target="_blank">
+            unimi.it
+          </a>
+          .
+        </p>
+      </div>
+    </section>
+  )
+}
+
+// Catalogo materie+docenti da DB (degree_courses): accordion compatto per
+// curriculum/anno, come il piano didattico ufficiale, con i docenti in linea.
+function DegreeCourseCatalog({
+  program,
+  onExploreSubject,
+}: {
+  program: DegreeProgram
+  onExploreSubject: (value: string) => void
+}) {
+  const [courses, setCourses] = useState<DegreeCourse[] | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    setCourses(null)
+    setFailed(false)
+    loadDegreeCatalog(program.slug)
+      .then((rows) => {
+        if (alive) setCourses(rows)
+      })
+      .catch(() => {
+        if (alive) setFailed(true)
+      })
+    return () => {
+      alive = false
+    }
+  }, [program.slug])
+
+  if (failed || (courses && courses.length === 0)) return <DegreeCatalogComingSoon program={program} />
+  if (!courses) {
+    return (
+      <section aria-busy="true" className="degree-catalog-loading">
+        <Loader2 className="spin" size={18} /> Carico il piano di studi…
+      </section>
+    )
+  }
+
+  const curricula = groupDegreeCatalog(courses)
+  const teacherCount = new Set(courses.flatMap((course) => course.teachers.map((teacher) => teacher.name))).size
+
+  return (
+    <section aria-label="Piano di studi con docenti" className="degree-catalog">
+      <header className="degree-catalog-head">
+        <h2>Materie e docenti del corso</h2>
+        <p>
+          {uniqueCourseNames(courses).length} insegnamenti · {teacherCount} docenti — piano didattico ufficiale{' '}
+          <a href={`https://www.unimi.it${program.unimiPath}`} rel="noreferrer" target="_blank">unimi.it</a>, offerta più
+          recente. Tocca una materia per cercare i materiali.
+        </p>
+      </header>
+      {curricula.map(({ curriculum, years }) => (
+        <div className="degree-catalog-curriculum" key={curriculum}>
+          {curricula.length > 1 ? <h3>{curriculum}</h3> : null}
+          {years.map((year) => (
+            <details className="degree-catalog-year" key={`${curriculum}-${year.yearNumber}`} open={year.yearNumber === 1}>
+              <summary>
+                {year.yearLabel}
+                <span className="degree-catalog-count">{year.courses.length} attività</span>
+              </summary>
+              <ul>
+                {year.courses.map((course) => (
+                  <li key={course.id}>
+                    <button onClick={() => onExploreSubject(course.name)} type="button">
+                      <span className="degree-catalog-course">
+                        {course.name}
+                        <small>
+                          {course.cfu ? `${course.cfu} CFU` : null}
+                          {course.cfu && course.ssd ? ' · ' : ''}
+                          {course.ssd ?? ''}
+                          {course.language && course.language !== 'Italiano' ? ` · ${course.language}` : ''}
+                        </small>
+                      </span>
+                      {course.teachers.length ? (
+                        <span className="degree-catalog-teachers">
+                          {course.teachers.map((teacher) => teacher.name).join(' · ')}
+                        </span>
+                      ) : (
+                        <span className="degree-catalog-teachers muted">Docenti non ancora pubblicati</span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ))}
+        </div>
+      ))}
+    </section>
+  )
+}
+
 function LandingPage({
   onRoute,
   onAuth,
   onExploreSubject,
   onOpenDemo,
+  onOpenDegree,
 }: {
   onRoute: (route: Route) => void
   onAuth: (mode: AuthMode) => void
   onExploreSubject: (value: string) => void
   onOpenDemo: () => void
+  onOpenDegree: (program: DegreeProgram) => void
 }) {
   const [heroQuery, setHeroQuery] = useState('')
   const [selectedCourse, setSelectedCourse] = useState('')
@@ -1133,6 +1446,22 @@ function LandingPage({
       </section>
 
       <SubjectsShowcase onExploreSubject={onExploreSubject} />
+
+      <section className="degree-directory-band section-wrap" id="corsi-di-laurea">
+        <div className="degree-directory-head">
+          <div>
+            <h2>Tutta la Statale, un corso alla volta</h2>
+            <p>
+              UnimiDoc copre i {DEGREE_PROGRAMS.length} corsi di laurea triennale dell’Università degli Studi di
+              Milano. Cerca il tuo corso o sfoglia per area: ogni corso ha la sua pagina dedicata.
+            </p>
+          </div>
+          <button className="ghost-button" onClick={() => onRoute('degrees')} type="button">
+            Vedi tutti i corsi <ArrowRight size={15} />
+          </button>
+        </div>
+        <DegreeDirectory compact onOpenDegree={onOpenDegree} />
+      </section>
 
       <section className="difference-band section-wrap">
         <h2>Perché qui è diverso</h2>
@@ -2328,7 +2657,6 @@ function buildAcademicYears(count = 6): string[] {
 
 const academicYears = buildAcademicYears()
 const EXAM_TYPES = ['Scritto', 'Orale', 'Scritto + orale', 'Scritto + progetto', 'Test a risposta multipla', 'In itinere']
-const DEGREE_COURSE = 'Scienze Biologiche (L-13)'
 const UNIVERSITY_NAME = 'Università degli Studi di Milano'
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
@@ -4740,6 +5068,7 @@ function UploadPage({
   const [workspaceTab, setWorkspaceTab] = useState<'dati' | 'strumenti'>('dati')
 
   const [title, setTitle] = useState(() => restoredDraft?.title ?? '')
+  const [degreeSlug, setDegreeSlug] = useState(DEFAULT_DEGREE_SLUG)
   const [subject, setSubject] = useState(subjects[0] ?? '')
   const [professor, setProfessor] = useState('')
   const [courseLine, setCourseLine] = useState<CourseLine | 'Tutti'>('Tutti')
@@ -4766,15 +5095,78 @@ function UploadPage({
     )
   }
 
-  const selectedCourse = useMemo(() => findCourse(subject), [subject])
+  const degreeProgram = findDegreeProgram(degreeSlug) ?? findDegreeProgram(DEFAULT_DEGREE_SLUG)!
+  // Scienze biologiche usa il catalogo statico curato (linee A-L/M-Z, coorti);
+  // gli altri corsi usano il catalogo DB (degree_courses) con i docenti unimi.it.
+  const isCatalogDegree = degreeProgram.slug === DEFAULT_DEGREE_SLUG && Boolean(degreeProgram.catalogReady)
+  const [dbCatalog, setDbCatalog] = useState<DegreeCourse[] | null>(null)
+  const [freeSubject, setFreeSubject] = useState(false)
+
+  const changeDegree = (slug: string) => {
+    const nextProgram = findDegreeProgram(slug)
+    setDegreeSlug(slug)
+    setSubject(nextProgram && nextProgram.slug === DEFAULT_DEGREE_SLUG ? subjects[0] ?? '' : '')
+    setFreeSubject(false)
+    setProfessor('')
+    setSemester('')
+  }
+
+  useEffect(() => {
+    if (isCatalogDegree) {
+      setDbCatalog(null)
+      return
+    }
+    let alive = true
+    loadDegreeCatalog(degreeSlug)
+      .then((rows) => {
+        if (alive) setDbCatalog(rows)
+      })
+      .catch(() => {
+        if (alive) setDbCatalog([])
+      })
+    return () => {
+      alive = false
+    }
+  }, [degreeSlug, isCatalogDegree])
+
+  const dbCourses = useMemo(() => (dbCatalog ? uniqueCourseNames(dbCatalog) : []), [dbCatalog])
+  const dbSelectedCourse = useMemo(
+    () => (freeSubject ? undefined : dbCourses.find((course) => course.name === subject)),
+    [dbCourses, subject, freeSubject],
+  )
+  const dbCoursesByYear = useMemo(() => {
+    const groups = new Map<string, DegreeCourse[]>()
+    for (const course of dbCourses) {
+      const label = course.yearLabel?.trim() || (course.yearNumber > 0 ? `Anno ${course.yearNumber}` : 'Altre attività')
+      const list = groups.get(label) ?? []
+      list.push(course)
+      groups.set(label, list)
+    }
+    return [...groups.entries()]
+  }, [dbCourses])
+
+  // Prima materia del piano preselezionata appena il catalogo DB è pronto.
+  useEffect(() => {
+    if (isCatalogDegree || !dbCatalog) return
+    if (dbCatalog.length === 0) {
+      setFreeSubject(true)
+      return
+    }
+    setSubject((current) => (current && dbCatalog.some((course) => course.name === current) ? current : uniqueCourseNames(dbCatalog)[0]?.name ?? ''))
+  }, [dbCatalog, isCatalogDegree])
+
+  const selectedCourse = useMemo(() => (isCatalogDegree ? findCourse(subject) : undefined), [subject, isCatalogDegree])
   const courseLines = useMemo(() => getCourseLines(selectedCourse), [selectedCourse])
   const suggestedProfessors = useMemo(
-    () => getCourseProfessors(selectedCourse, courseLine),
-    [courseLine, selectedCourse],
+    () =>
+      isCatalogDegree
+        ? getCourseProfessors(selectedCourse, courseLine)
+        : (dbSelectedCourse?.teachers ?? []).map((teacher) => teacher.name),
+    [courseLine, selectedCourse, isCatalogDegree, dbSelectedCourse],
   )
   const professorSuggestions = useMemo(
-    () => Array.from(new Set([...suggestedProfessors, ...professors])),
-    [suggestedProfessors],
+    () => (isCatalogDegree ? Array.from(new Set([...suggestedProfessors, ...professors])) : suggestedProfessors),
+    [suggestedProfessors, isCatalogDegree],
   )
   const isWordUpload = Boolean(file && isWordFile(file) && !isPdfFile(file))
 
@@ -4788,6 +5180,14 @@ function UploadPage({
       setSemester(selectedCourse.semester)
     }
   }, [selectedCourse])
+
+  useEffect(() => {
+    const period = dbSelectedCourse?.period?.toLowerCase() ?? ''
+    if (!period) return
+    if (period.includes('primo semestre')) setSemester('1 semestre')
+    else if (period.includes('secondo semestre')) setSemester('2 semestre')
+    else if (period.includes('annuale') || period.includes('più periodi')) setSemester('Annuale')
+  }, [dbSelectedCourse])
 
   // Tag suggeriti automaticamente dalle keyword estratte (editabili).
   useEffect(() => {
@@ -5192,7 +5592,7 @@ function UploadPage({
     && cloudState !== 'saving'
     && Boolean(file)
     && Boolean(title.trim())
-    && Boolean(subject)
+    && Boolean(subject.trim())
     && Boolean(professor.trim())
     && rights
     && (user?.isDemo === true || remoteUploadEnabled)
@@ -5220,7 +5620,9 @@ function UploadPage({
     const baseName = (file?.name ?? 'documento.pdf').replace(/\.(docx?|DOCX?)$/, '.pdf')
     const created = await createDocumentUpload({
       title: title.trim(),
-      courseName: subject,
+      courseName: subject.trim(),
+      degreeSlug,
+      degreeCourse: degreeCourseLabel(degreeProgram),
       originalFileSha256: sha,
       originalSizeBytes: bytes.byteLength,
       mimeType: 'application/pdf',
@@ -5328,7 +5730,7 @@ function UploadPage({
           ? 'diagram'
           : 'notes',
       insights: insights ?? undefined,
-      degreeCourse: DEGREE_COURSE,
+      degreeCourse: degreeCourseLabel(degreeProgram),
       university: UNIVERSITY_NAME,
       semester: semester || undefined,
       tags: tagsInput
@@ -5814,7 +6216,7 @@ function UploadPage({
             <fieldset className="upload-fieldset">
               <legend><span className="upload-step-badge">1</span> Informazioni essenziali</legend>
               <div className="form-grid refined">
-                <label className="field-wide">
+                <label className="field-wide field-full">
                   <span className="field-label-row">Titolo <em className="field-required">obbligatorio</em></span>
                   <input
                     maxLength={180}
@@ -5825,12 +6227,75 @@ function UploadPage({
                   <small className="field-counter">{title.trim().length}/180 · minimo 3 caratteri</small>
                 </label>
                 <label className="field-wide">
-                  <span className="field-label-row">Materia <em className="field-required">obbligatorio</em></span>
-                  <select onChange={(event) => setSubject(event.target.value)} value={subject}>
-                    {subjects.map((option) => (
-                      <option key={option}>{option}</option>
+                  <span className="field-label-row">Corso di laurea <em className="field-required">obbligatorio</em></span>
+                  <select onChange={(event) => changeDegree(event.target.value)} value={degreeSlug}>
+                    {degreeProgramsByArea().map(({ area, programs }) => (
+                      <optgroup key={area} label={area}>
+                        {programs.map((program) => (
+                          <option key={program.slug} value={program.slug}>
+                            {program.name} ({program.classe})
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
+                </label>
+                <label className="field-wide">
+                  <span className="field-label-row">Materia <em className="field-required">obbligatorio</em></span>
+                  {isCatalogDegree ? (
+                    <select onChange={(event) => setSubject(event.target.value)} value={subject}>
+                      {subjects.map((option) => (
+                        <option key={option}>{option}</option>
+                      ))}
+                    </select>
+                  ) : dbCourses.length > 0 && !freeSubject ? (
+                    <select
+                      onChange={(event) => {
+                        if (event.target.value === '__free__') {
+                          setFreeSubject(true)
+                          setSubject('')
+                        } else {
+                          setSubject(event.target.value)
+                        }
+                        setProfessor('')
+                      }}
+                      value={subject}
+                    >
+                      {dbCoursesByYear.map(([label, list]) => (
+                        <optgroup key={label} label={label}>
+                          {list.map((course) => (
+                            <option key={course.id} value={course.name}>
+                              {course.name}
+                              {course.cfu ? ` · ${course.cfu} CFU` : ''}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                      <option value="__free__">Altra materia (testo libero)…</option>
+                    </select>
+                  ) : (
+                    <>
+                      <input
+                        maxLength={120}
+                        onChange={(event) => setSubject(event.target.value)}
+                        placeholder="Es. Anatomia umana, Diritto privato, Analisi 1"
+                        value={subject}
+                      />
+                      {dbCourses.length > 0 ? (
+                        <button
+                          className="linklike-button"
+                          onClick={() => {
+                            setFreeSubject(false)
+                            setSubject(dbCourses[0]?.name ?? '')
+                            setProfessor('')
+                          }}
+                          type="button"
+                        >
+                          Torna all’elenco materie del corso
+                        </button>
+                      ) : null}
+                    </>
+                  )}
                 </label>
               </div>
 
@@ -5843,29 +6308,48 @@ function UploadPage({
                     {selectedCourse.cohortNote ? <em>{selectedCourse.cohortNote}</em> : null}
                   </div>
                 </div>
+              ) : dbSelectedCourse ? (
+                <div className="course-match-card">
+                  <BookOpen size={18} />
+                  <div>
+                    <strong>{dbSelectedCourse.name}</strong>
+                    <small>
+                      {[
+                        dbSelectedCourse.yearLabel ?? (dbSelectedCourse.yearNumber > 0 ? `Anno ${dbSelectedCourse.yearNumber}` : null),
+                        dbSelectedCourse.cfu ? `${dbSelectedCourse.cfu} CFU` : null,
+                        dbSelectedCourse.ssd,
+                        dbSelectedCourse.period,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </small>
+                  </div>
+                </div>
               ) : null}
 
               <div className="teacher-picker">
-                <div className="teacher-picker-row">
-                  <label>
-                    Linea / edizione
-                    <select
-                      disabled={courseLines.length === 0}
-                      onChange={(event) => setCourseLine(event.target.value as CourseLine | 'Tutti')}
-                      value={courseLine}
-                    >
-                      <option value="Tutti">Tutte</option>
-                      {courseLines.map((line) => (
-                        <option key={line} value={line}>{line}</option>
-                      ))}
-                    </select>
-                  </label>
+                <div className={isCatalogDegree ? 'teacher-picker-row' : 'teacher-picker-row single'}>
+                  {isCatalogDegree ? (
+                    <label>
+                      Linea / edizione
+                      <select
+                        disabled={courseLines.length === 0}
+                        onChange={(event) => setCourseLine(event.target.value as CourseLine | 'Tutti')}
+                        value={courseLine}
+                      >
+                        <option value="Tutti">Tutte</option>
+                        {courseLines.map((line) => (
+                          <option key={line} value={line}>{line}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                   <label>
                     <span className="field-label-row">Docente <em className="field-required">obbligatorio</em></span>
                     <input
                       list="upload-professor-suggestions"
                       onChange={(event) => setProfessor(event.target.value)}
-                      placeholder="Scrivi o scegli un docente"
+                      placeholder={isCatalogDegree ? 'Scrivi o scegli un docente' : 'Nome e cognome del docente del corso'}
                       value={professor}
                     />
                   </label>
@@ -5888,9 +6372,19 @@ function UploadPage({
                       </button>
                     ))}
                   </div>
-                ) : (
+                ) : isCatalogDegree ? (
                   <p className="manual-professor-note">
                     Nessun docente unico per questa attivita: indica il tutor o il riferimento che compare nel materiale.
+                  </p>
+                ) : dbSelectedCourse ? (
+                  <p className="manual-professor-note">
+                    Docenti non ancora pubblicati per questa attività: indica il docente del tuo anno così come compare
+                    sul materiale.
+                  </p>
+                ) : (
+                  <p className="manual-professor-note">
+                    Il catalogo docenti di {degreeProgram.name} è in preparazione: indica il docente così come compare
+                    sul materiale o sul sito del corso.
                   </p>
                 )}
               </div>
@@ -5934,7 +6428,7 @@ function UploadPage({
                 </label>
               </div>
               <p className="upload-fixed-meta">
-                <Lock size={13} /> {DEGREE_COURSE} · {UNIVERSITY_NAME}
+                <Lock size={13} /> {degreeCourseLabel(degreeProgram)} · {UNIVERSITY_NAME}
               </p>
             </fieldset>
 
@@ -7451,6 +7945,9 @@ function App() {
       ? findUploaderBySlug(window.location.pathname, appDocuments)
       : null,
   )
+  const [routeDegree, setRouteDegree] = useState<DegreeProgram | null>(() =>
+    initialRoute === 'degree' ? findDegreeByPath(window.location.pathname) : null,
+  )
   const [authMode, setAuthMode] = useState<AuthMode>(authModeFromRoute(initialRoute))
   const [authUser, setAuthUser] = useState<AppAuthUser | null>(() => loadStoredDemoUser())
   const [credits, setCredits] = useState(() => (isSupabaseConfigured ? 0 : 120))
@@ -7504,6 +8001,15 @@ function App() {
     setRouteDocument(document)
     if (window.location.pathname !== nextPath) {
       window.history.pushState({ route: 'document' }, '', nextPath)
+    }
+  }
+
+  const openDegreePage = (program: DegreeProgram) => {
+    const nextPath = degreeProgramPath(program)
+    setRoute('degree')
+    setRouteDegree(program)
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({ route: 'degree' }, '', nextPath)
     }
   }
 
@@ -7566,6 +8072,7 @@ function App() {
   useEffect(() => {
     if (route === 'document') setRouteDocument(findDocumentByPath(window.location.pathname, visibleDocuments))
     if (route === 'profile') setRouteProfile(findUploaderBySlug(window.location.pathname, visibleDocuments))
+    if (route === 'degree') setRouteDegree(findDegreeByPath(window.location.pathname))
   }, [route, visibleDocuments])
 
   useEffect(() => {
@@ -7576,21 +8083,28 @@ function App() {
     const seo = routeSeo[route]
     const isDocPage = route === 'document' && routeDocument
     const isProfilePage = route === 'profile' && routeProfile
+    const isDegreePage = route === 'degree' && routeDegree
     const title = isDocPage
       ? documentSeoTitle(routeDocument)
       : isProfilePage
         ? `${routeProfile.name} · Appunti Scienze Biologiche UniMi | UnimiDoc`
-        : seo.title
+        : isDegreePage
+          ? degreeSeoTitle(routeDegree)
+          : seo.title
     const descriptionText = isDocPage
       ? documentSeoDescription(routeDocument)
       : isProfilePage
         ? `Materiali, valutazioni e vendite di ${routeProfile.name} per Scienze Biologiche L-13 alla Statale di Milano.`
-        : seo.description
+        : isDegreePage
+          ? degreeSeoDescription(routeDegree)
+          : seo.description
     const canonicalPath = isDocPage
       ? documentPath(routeDocument)
       : isProfilePage
         ? publicProfilePath(routeProfile)
-        : routePaths[route === 'signup' ? 'login' : route]
+        : isDegreePage
+          ? degreeProgramPath(routeDegree)
+          : routePaths[route === 'signup' ? 'login' : route]
     const canonicalUrl = `${window.location.origin}${canonicalPath}`
 
     document.title = title
@@ -7623,6 +8137,11 @@ function App() {
     setMetaTag('name', 'twitter:title', title)
     setMetaTag('name', 'twitter:description', descriptionText)
 
+    // Uno slug corso sconosciuto renderizza un fallback "non trovato": senza
+    // noindex Google lo tratterebbe come soft-404 indicizzabile.
+    const isNotFoundPage = route === 'degree' && !routeDegree
+    setMetaTag('name', 'robots', isNotFoundPage ? 'noindex, follow' : 'index, follow, max-image-preview:large, max-snippet:-1')
+
     if (isDocPage) {
       setJsonLd('document', documentJsonLd(routeDocument, canonicalUrl))
       setJsonLd('breadcrumb', breadcrumbJsonLd(routeDocument, window.location.origin))
@@ -7636,7 +8155,16 @@ function App() {
     } else {
       setJsonLd('ranking', null)
     }
-  }, [route, routeDocument, routeProfile, visibleDocuments])
+
+    // Pagine corsi di laurea: markup Course / ItemList per SERP e AI Overview.
+    if (isDegreePage) {
+      setJsonLd('degree', degreeJsonLd(routeDegree, canonicalUrl))
+    } else if (route === 'degrees') {
+      setJsonLd('degree', degreeCatalogJsonLd(window.location.origin))
+    } else {
+      setJsonLd('degree', null)
+    }
+  }, [route, routeDocument, routeProfile, routeDegree, visibleDocuments])
 
   const notify = (message: string) => {
     setToast(message)
@@ -7913,7 +8441,18 @@ function App() {
         <Header route={route} isLoggedIn={isLoggedIn} credits={credits} user={authUser} onRoute={navigateRoute} onAuth={goAuth} onSearch={searchDocuments} onSignOut={() => void handleSignOut()} />
       ) : null}
       {route === 'landing' ? (
-        <LandingPage onRoute={navigateRoute} onAuth={goAuth} onExploreSubject={exploreSubject} onOpenDemo={() => setDemoOpen(true)} />
+        <LandingPage onRoute={navigateRoute} onAuth={goAuth} onExploreSubject={exploreSubject} onOpenDemo={() => setDemoOpen(true)} onOpenDegree={openDegreePage} />
+      ) : null}
+      {route === 'degrees' ? (
+        <DegreeCatalogPage onOpenDegree={openDegreePage} onRoute={navigateRoute} />
+      ) : null}
+      {route === 'degree' ? (
+        <DegreeProgramPage
+          program={routeDegree}
+          onExploreSubject={exploreSubject}
+          onOpenDegree={openDegreePage}
+          onRoute={navigateRoute}
+        />
       ) : null}
       {route === 'login' || route === 'signup' ? (
         <LoginPage mode={authMode} onMode={switchAuthMode} onSubmit={completeLogin} onRoute={navigateRoute} />
