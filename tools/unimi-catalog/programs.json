@@ -1,0 +1,497 @@
+[
+ {
+  "slug": "artificial-intelligence",
+  "name": "Artificial Intelligence",
+  "unimi_path": "/it/corsi/laurea-triennale/artificial-intelligence",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "beni-culturali-scienze-tecnologie-diagnostica",
+  "name": "Beni culturali: scienze, tecnologie e diagnostica",
+  "unimi_path": "/it/corsi/laurea-triennale/beni-culturali-scienze-tecnologie-e-diagnostica",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "biotecnologia",
+  "name": "Biotecnologia",
+  "unimi_path": "/it/corsi/laurea-triennale/biotecnologia",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "chimica",
+  "name": "Chimica",
+  "unimi_path": "/it/corsi/laurea-triennale/chimica",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "chimica-industriale",
+  "name": "Chimica industriale",
+  "unimi_path": "/it/corsi/laurea-triennale/chimica-industriale",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "fisica",
+  "name": "Fisica",
+  "unimi_path": "/it/corsi/laurea-triennale/fisica",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "informatica",
+  "name": "Informatica",
+  "unimi_path": "/it/corsi/laurea-triennale/informatica",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "informatica-musicale",
+  "name": "Informatica musicale",
+  "unimi_path": "/it/corsi/laurea-triennale/informatica-musicale",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "informatica-comunicazione-digitale",
+  "name": "Informatica per la comunicazione digitale",
+  "unimi_path": "/it/corsi/laurea-triennale/informatica-la-comunicazione-digitale",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "matematica",
+  "name": "Matematica",
+  "unimi_path": "/it/corsi/laurea-triennale/matematica-triennale",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-ambientali-politiche-sostenibilita",
+  "name": "Scienze ambientali e politiche per la sostenibilità",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-ambientali-e-politiche-la-sostenibilita",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-biologiche",
+  "name": "Scienze biologiche",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-biologiche",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-geologiche",
+  "name": "Scienze geologiche",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-geologiche",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-naturali",
+  "name": "Scienze naturali",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-naturali",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "sicurezza-sistemi-reti-informatiche",
+  "name": "Sicurezza dei sistemi e delle reti informatiche",
+  "unimi_path": "/it/corsi/laurea-triennale/sicurezza-dei-sistemi-e-delle-reti-informatiche",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "sicurezza-informatica-intelligenza-artificiale",
+  "name": "Sicurezza informatica e intelligenza artificiale",
+  "unimi_path": "/it/corsi/laurea-triennale/sicurezza-informatica-e-intelligenza-artificiale",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "assistenza-sanitaria",
+  "name": "Assistenza sanitaria",
+  "unimi_path": "/it/corsi/laurea-triennale/assistenza-sanitaria",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "biotecnologie-mediche",
+  "name": "Biotecnologie mediche",
+  "unimi_path": "/it/corsi/laurea-triennale/biotecnologie-mediche",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "dietistica",
+  "name": "Dietistica",
+  "unimi_path": "/it/corsi/laurea-triennale/dietistica",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "fisioterapia",
+  "name": "Fisioterapia",
+  "unimi_path": "/it/corsi/laurea-triennale/fisioterapia",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "igiene-dentale",
+  "name": "Igiene dentale",
+  "unimi_path": "/it/corsi/laurea-triennale/igiene-dentale",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "infermieristica",
+  "name": "Infermieristica",
+  "unimi_path": "/it/corsi/laurea-triennale/infermieristica",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "logopedia",
+  "name": "Logopedia",
+  "unimi_path": "/it/corsi/laurea-triennale/logopedia",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "ortottica-assistenza-oftalmologica",
+  "name": "Ortottica ed assistenza oftalmologica",
+  "unimi_path": "/it/corsi/laurea-triennale/ortottica-ed-assistenza-oftalmologica",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "ostetricia",
+  "name": "Ostetricia",
+  "unimi_path": "/it/corsi/laurea-triennale/ostetricia",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "podologia",
+  "name": "Podologia",
+  "unimi_path": "/it/corsi/laurea-triennale/podologia",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-motorie-sport-salute",
+  "name": "Scienze motorie, sport e salute",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-motorie-sport-e-salute",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-psicologiche-prevenzione-cura",
+  "name": "Scienze psicologiche per la prevenzione e la cura",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-psicologiche-la-prevenzione-e-la-cura",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "tecnica-riabilitazione-psichiatrica",
+  "name": "Tecnica della riabilitazione psichiatrica",
+  "unimi_path": "/it/corsi/laurea-triennale/tecnica-della-riabilitazione-psichiatrica",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "tecniche-audiometriche",
+  "name": "Tecniche audiometriche",
+  "unimi_path": "/it/corsi/laurea-triennale/tecniche-audiometriche",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "tecniche-audioprotesiche",
+  "name": "Tecniche audioprotesiche",
+  "unimi_path": "/it/corsi/laurea-triennale/tecniche-audioprotesiche",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "tecniche-fisiopatologia-cardiocircolatoria",
+  "name": "Tecniche di fisiopatologia cardiocircolatoria e perfusione cardiovascolare",
+  "unimi_path": "/it/corsi/laurea-triennale/tecniche-di-fisiopatologia-cardiocircolatoria-e-perfusione-cardiovascolare",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "tecniche-laboratorio-biomedico",
+  "name": "Tecniche di laboratorio biomedico",
+  "unimi_path": "/it/corsi/laurea-triennale/tecniche-di-laboratorio-biomedico",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "tecniche-neurofisiopatologia",
+  "name": "Tecniche di neurofisiopatologia",
+  "unimi_path": "/it/corsi/laurea-triennale/tecniche-di-neurofisiopatologia",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "tecniche-radiologia-medica",
+  "name": "Tecniche di radiologia medica, per immagini e radioterapia",
+  "unimi_path": "/it/corsi/laurea-triennale/tecniche-di-radiologia-medica-immagini-e-radioterapia",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "tecniche-ortopediche",
+  "name": "Tecniche ortopediche",
+  "unimi_path": "/it/corsi/laurea-triennale/tecniche-ortopediche",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "terapia-neuro-psicomotricita-eta-evolutiva",
+  "name": "Terapia della neuro e psicomotricità dell’età evolutiva",
+  "unimi_path": "/it/corsi/laurea-triennale/terapia-della-neuro-e-psicomotricita-delleta-evolutiva",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "terapia-occupazionale",
+  "name": "Terapia occupazionale",
+  "unimi_path": "/it/corsi/laurea-triennale/terapia-occupazionale",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "agricoltura-sostenibile",
+  "name": "Agricoltura sostenibile",
+  "unimi_path": "/it/corsi/laurea-triennale/agricoltura-sostenibile",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "produzione-protezione-piante-verde",
+  "name": "Produzione e protezione delle piante e dei sistemi del verde",
+  "unimi_path": "/it/corsi/laurea-triennale/produzione-e-protezione-delle-piante-e-dei-sistemi-del-verde",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-ristorazione-distribuzione-alimenti",
+  "name": "Scienze della ristorazione e distribuzione degli alimenti",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-della-ristorazione-e-distribuzione-degli-alimenti",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-produzioni-animali",
+  "name": "Scienze delle produzioni animali",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-delle-produzioni-animali",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-tecnologie-alimenti-sostenibili",
+  "name": "Scienze e tecnologie per alimenti sostenibili",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-e-tecnologie-alimenti-sostenibili",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "sistemi-digitali-agricoltura",
+  "name": "Sistemi digitali in agricoltura",
+  "unimi_path": "/it/corsi/laurea-triennale/sistemi-digitali-agricoltura",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "viticoltura-enologia",
+  "name": "Viticoltura ed enologia",
+  "unimi_path": "/it/corsi/laurea-triennale/viticoltura-ed-enologia",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-prodotti-naturali-salute-sepnas",
+  "name": "Scienze dei prodotti naturali per la salute – SEPNAS",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-dei-prodotti-naturali-la-salute-sepnas",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "tossicologia-sicurezza-umana-ambientale-tops",
+  "name": "Tossicologia per la sicurezza umana e ambientale – TopS",
+  "unimi_path": "/it/corsi/laurea-triennale/tossicologia-la-sicurezza-umana-e-ambientale-tops",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "ancient-civilizations-contemporary-world",
+  "name": "Ancient Civilizations for the Contemporary World",
+  "unimi_path": "/it/corsi/laurea-triennale/ancient-civilizations-contemporary-world",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "filosofia",
+  "name": "Filosofia",
+  "unimi_path": "/it/corsi/laurea-triennale/filosofia",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "geografia-ambiente-territorio",
+  "name": "Geografia, ambiente e territorio",
+  "unimi_path": "/it/corsi/laurea-triennale/geografia-ambiente-e-territorio",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "interpretariato-traduzione-lis-list",
+  "name": "Interpretariato e traduzione in lingua dei segni italiana (LIS) e tattile (LIST)",
+  "unimi_path": "/it/corsi/laurea-triennale/interpretariato-e-traduzione-lingua-dei-segni-italiana-lis-e-lingua-dei",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "lettere",
+  "name": "Lettere",
+  "unimi_path": "/it/corsi/laurea-triennale/lettere",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "lingue-letterature-moderne",
+  "name": "Lingue e letterature moderne",
+  "unimi_path": "/it/corsi/laurea-triennale/lingue-e-letterature-moderne",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "mediazione-linguistica-culturale",
+  "name": "Mediazione linguistica e culturale",
+  "unimi_path": "/it/corsi/laurea-triennale/mediazione-linguistica-e-culturale-applicata-allambito-economico-giuridico-e",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-beni-culturali",
+  "name": "Scienze dei beni culturali",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-dei-beni-culturali",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-umanistiche-comunicazione",
+  "name": "Scienze umanistiche per la comunicazione",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-umanistiche-la-comunicazione",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "storia",
+  "name": "Storia",
+  "unimi_path": "/it/corsi/laurea-triennale/storia",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-servizi-giuridici",
+  "name": "Scienze dei servizi giuridici",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-dei-servizi-giuridici",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "comunicazione-societa-ces",
+  "name": "Comunicazione e società (CES)",
+  "unimi_path": "/it/corsi/laurea-triennale/comunicazione-e-societa-ces",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "economia-aziendale",
+  "name": "Economia aziendale",
+  "unimi_path": "/it/corsi/laurea-triennale/economia-aziendale",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "economia-management-ema",
+  "name": "Economia e management (EMA)",
+  "unimi_path": "/it/corsi/laurea-triennale/economia-e-management-ema",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "economics-behavior-data-policy",
+  "name": "Economics: behavior, data and policy",
+  "unimi_path": "/it/corsi/laurea-triennale/economics-behavior-data-and-policy",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "international-politics-law-economics-iple",
+  "name": "International Politics, Law and Economics (IPLE)",
+  "unimi_path": "/it/corsi/laurea-triennale/international-politics-law-and-economics-iple",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "management-governance-innovazione-magips",
+  "name": "Management, governance e innovazione nel pubblico e nel socio-sanitario (MAGIPS)",
+  "unimi_path": "/it/corsi/laurea-triennale/management-governance-e-innovazione-nel-pubblico-e-nel-socio-sanitario",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "management-organizzazioni-lavoro-mol",
+  "name": "Management delle organizzazioni e del lavoro (MOL)",
+  "unimi_path": "/it/corsi/laurea-triennale/management-delle-organizzazioni-e-del-lavoro-mol",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-internazionali-istituzioni-europee-sie",
+  "name": "Scienze internazionali e istituzioni europee (SIE)",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-internazionali-e-istituzioni-europee-sie",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-politiche-spo",
+  "name": "Scienze politiche (SPO)",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-politiche-spo",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "scienze-sociali-globalizzazione-glo",
+  "name": "Scienze sociali per la globalizzazione (GLO)",
+  "unimi_path": "/it/corsi/laurea-triennale/scienze-sociali-la-globalizzazione-glo",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "tecniche-prevenzione-ambiente-lavoro",
+  "name": "Tecniche della prevenzione nell'ambiente e nei luoghi di lavoro",
+  "unimi_path": "/it/corsi/laurea-triennale/tecniche-della-prevenzione-nellambiente-e-nei-luoghi-di-lavoro",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "allevamento-benessere-animali-affezione",
+  "name": "Allevamento e benessere degli animali d'affezione",
+  "unimi_path": "/it/corsi/laurea-triennale/allevamento-e-benessere-degli-animali-daffezione",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "tecnologie-gestione-impresa-casearia",
+  "name": "Tecnologie e gestione dell'impresa casearia",
+  "unimi_path": "/it/corsi/laurea-triennale/tecnologie-e-gestione-dellimpresa-casearia-l-p02-interateneo",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "valorizzazione-tutela-ambiente-territorio-montano",
+  "name": "Valorizzazione e tutela dell'ambiente e del territorio montano",
+  "unimi_path": "/it/corsi/laurea-triennale/valorizzazione-e-tutela-dellambiente-e-del-territorio-montano",
+  "degree_type": "triennale"
+ },
+ {
+  "slug": "medicina-chirurgia-polo-centrale",
+  "name": "Medicina e chirurgia - Polo Centrale",
+  "unimi_path": "/it/corsi/laurea-magistrale-ciclo-unico/medicina-e-chirurgia-polo-centrale",
+  "degree_type": "ciclo-unico",
+  "cds_match": "medicina e chirurgia polo centrale"
+ },
+ {
+  "slug": "medicina-chirurgia-polo-san-paolo",
+  "name": "Medicina e chirurgia - Polo San Paolo",
+  "unimi_path": "/it/corsi/laurea-magistrale-ciclo-unico/medicina-e-chirurgia-polo-san-paolo",
+  "degree_type": "ciclo-unico",
+  "cds_match": "medicina e chirurgia polo san paolo"
+ },
+ {
+  "slug": "medicina-chirurgia-polo-vialba",
+  "name": "Medicina e chirurgia - Polo Vialba",
+  "unimi_path": "/it/corsi/laurea-magistrale-ciclo-unico/medicina-e-chirurgia-polo-vialba",
+  "degree_type": "ciclo-unico",
+  "cds_match": "medicina e chirurgia polo vialba"
+ },
+ {
+  "slug": "medicina-chirurgia-ims",
+  "name": "Medicina e chirurgia - International Medical School",
+  "unimi_path": "/it/corsi/laurea-magistrale-ciclo-unico/medicina-e-chirurgia-international-medical-school",
+  "degree_type": "ciclo-unico",
+  "cds_match": "medicina e chirurgia international medical school"
+ },
+ {
+  "slug": "odontoiatria-protesi-dentaria",
+  "name": "Odontoiatria e protesi dentaria",
+  "unimi_path": "/it/corsi/laurea-magistrale-ciclo-unico/odontoiatria-e-protesi-dentaria",
+  "degree_type": "ciclo-unico",
+  "cds_match": "odontoiatria e protesi dentaria"
+ },
+ {
+  "slug": "medicina-veterinaria",
+  "name": "Medicina veterinaria",
+  "unimi_path": "/it/corsi/laurea-magistrale-ciclo-unico/medicina-veterinaria-ciclo-unico",
+  "degree_type": "ciclo-unico",
+  "cds_match": "medicina veterinaria"
+ },
+ {
+  "slug": "farmacia",
+  "name": "Farmacia",
+  "unimi_path": "/it/corsi/laurea-magistrale-ciclo-unico/farmacia-ciclo-unico",
+  "degree_type": "ciclo-unico",
+  "cds_match": "farmacia"
+ },
+ {
+  "slug": "chimica-tecnologia-farmaceutiche",
+  "name": "Chimica e tecnologia farmaceutiche",
+  "unimi_path": "/it/corsi/laurea-magistrale-ciclo-unico/chimica-e-tecnologia-farmaceutiche-ciclo-unico",
+  "degree_type": "ciclo-unico",
+  "cds_match": "chimica e tecnologia farmaceutiche"
+ },
+ {
+  "slug": "giurisprudenza",
+  "name": "Giurisprudenza",
+  "unimi_path": "/it/corsi/laurea-magistrale-ciclo-unico/giurisprudenza-ciclo-unico",
+  "degree_type": "ciclo-unico",
+  "cds_match": "giurisprudenza"
+ }
+]

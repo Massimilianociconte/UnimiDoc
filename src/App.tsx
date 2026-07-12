@@ -34,6 +34,7 @@ import {
   Mail,
   PanelRight,
   PencilLine,
+  PlayCircle,
   Plus,
   RefreshCw,
   ScanLine,
@@ -157,6 +158,14 @@ import {
   type FlashcardStudyRecord,
 } from './lib/flashcardProgress'
 import {
+  buildChapterReviewGroups,
+  buildSmartChapterDeck,
+  buildSubjectReviewSummaries,
+  recordsToStudyDeck,
+  selectReviewRecords,
+  type ReviewScope,
+} from './lib/flashcardReview'
+import {
   creditsToEur,
   creditTier,
   effectiveDocumentPrice,
@@ -201,11 +210,13 @@ import {
   degreeCourseLabel,
   degreeProgramPath,
   degreeProgramsByArea,
+  degreeTypeOf,
   findDegreeByPath,
   findDegreeProgram,
   type DegreeProgram,
 } from './degreePrograms'
 import {
+  CATALOG_ACADEMIC_YEAR,
   groupDegreeCatalog,
   loadDegreeCatalog,
   uniqueCourseNames,
@@ -379,13 +390,13 @@ const routeSeo: Record<Route, { title: string; description: string }> = {
     description: 'Profilo pubblico di un autore UnimiDoc: materiali, valutazioni, vendite e affidabilità per Scienze Biologiche L-13.',
   },
   degrees: {
-    title: 'Corsi di laurea triennale della Statale di Milano - UnimiDoc',
+    title: 'Corsi di laurea triennale e a ciclo unico della Statale di Milano - UnimiDoc',
     description:
-      'Tutti i corsi di laurea triennale dell’Università degli Studi di Milano su UnimiDoc: trova o carica appunti per il tuo corso, dalla biologia all’informatica alle professioni sanitarie.',
+      'Tutti i corsi di laurea triennale e magistrale a ciclo unico dell’Università degli Studi di Milano su UnimiDoc: trova o carica appunti per il tuo corso, da Medicina e Giurisprudenza alla biologia, all’informatica e alle professioni sanitarie.',
   },
   degree: {
     title: 'Appunti per corso di laurea - UnimiDoc',
-    description: 'Appunti, dispense ed esercizi per i corsi di laurea triennale della Statale di Milano.',
+    description: 'Appunti, dispense ed esercizi per i corsi di laurea triennale e magistrale a ciclo unico della Statale di Milano.',
   },
   privacy: {
     title: 'Informativa privacy - UnimiDoc',
@@ -1129,9 +1140,11 @@ function DegreeDirectory({ compact, onOpenDegree }: { compact?: boolean; onOpenD
 }
 
 function DegreeChip({ program, onOpenDegree }: { program: DegreeProgram; onOpenDegree: (program: DegreeProgram) => void }) {
+  const cicloUnico = degreeTypeOf(program) === 'ciclo-unico'
+  const interateneo = Boolean(program.interateneo)
   return (
     <a
-      className={`degree-chip ${program.catalogReady ? 'ready' : ''}`}
+      className={`degree-chip ${program.catalogReady ? 'ready' : ''} ${cicloUnico ? 'ciclo-unico' : ''} ${interateneo ? 'interateneo' : ''}`}
       href={degreeProgramPath(program)}
       onClick={(event) => {
         event.preventDefault()
@@ -1141,8 +1154,10 @@ function DegreeChip({ program, onOpenDegree }: { program: DegreeProgram; onOpenD
     >
       <strong>{program.name}</strong>
       <span>
+        {cicloUnico ? <em className="degree-chip-badge">Ciclo unico</em> : null}
+        {interateneo ? <em className="degree-chip-badge interateneo" title={`Interateneo · ${program.interateneo}`}>Interateneo</em> : null}
         {program.classe}
-        {program.catalogReady ? ' · catalogo completo' : ''}
+        {program.catalogReady ? ' · piano disponibile' : ''}
         {program.activeFrom ? ` · dal ${program.activeFrom}` : ''}
       </span>
     </a>
@@ -1160,11 +1175,13 @@ function DegreeCatalogPage({
     <main className="degree-page section-wrap">
       <header className="degree-page-hero">
         <p className="dashboard-kicker"><GraduationCap size={15} /> Corsi di laurea</p>
-        <h1>I corsi di laurea triennale della Statale di Milano</h1>
+        <h1>I corsi di laurea della Statale di Milano</h1>
         <p className="degree-page-lead">
-          {DEGREE_PROGRAMS.length} corsi triennali attivi (offerta 2025/26, fonte unimi.it). Scienze biologiche ha
-          già il catalogo completo di materie e docenti; per gli altri corsi puoi caricare appunti indicando materia
-          e docente, e il catalogo dettagliato arriverà progressivamente.
+          {DEGREE_PROGRAMS.filter((program) => degreeTypeOf(program) === 'triennale').length} lauree triennali e{' '}
+          {DEGREE_PROGRAMS.filter((program) => degreeTypeOf(program) === 'ciclo-unico').length} magistrali a ciclo unico
+          (offerta 2025/26–2026/27, fonte unimi.it). {DEGREE_PROGRAMS.filter((program) => program.catalogReady).length}{' '}
+          hanno il piano di studi strutturato con le materie ufficiali; i docenti sono indicati con il relativo A.A.
+          quando UniMi li pubblica. Per gli altri puoi caricare appunti indicando materia e docente.
         </p>
       </header>
       <DegreeDirectory onOpenDegree={onOpenDegree} />
@@ -1211,7 +1228,7 @@ function DegreeProgramPage({
         <p className="dashboard-kicker"><GraduationCap size={15} /> {program.area}</p>
         <h1>Appunti per {program.name}</h1>
         <p className="degree-page-lead">
-          Laurea triennale, classe {program.classe}
+          {degreeTypeOf(program) === 'ciclo-unico' ? 'Laurea magistrale a ciclo unico' : 'Laurea triennale'}, classe {program.classe}
           {program.interateneo ? ` · interateneo con ${program.interateneo}` : ''}
           {program.activeFrom ? ` · attivo dall’a.a. ${program.activeFrom}` : ''} — Università degli Studi di
           Milano. Dispense, riassunti, schemi ed esercizi caricati dagli studenti e verificati prima della
@@ -1227,25 +1244,24 @@ function DegreeProgramPage({
         </div>
       </header>
 
-      {program.slug === DEFAULT_DEGREE_SLUG ? (
-        <SubjectsShowcase onExploreSubject={onExploreSubject} />
-      ) : (
-        <DegreeCourseCatalog program={program} onExploreSubject={onExploreSubject} />
-      )}
+      <DegreeCourseCatalog program={program} onExploreSubject={onExploreSubject} />
     </main>
   )
 }
 
 function DegreeCatalogComingSoon({ program }: { program: DegreeProgram }) {
+  const interateneo = program.interateneo
   return (
     <section className="degree-coming-soon">
       <BookOpen size={20} />
       <div>
-        <strong>Catalogo materie e docenti in preparazione</strong>
+        <strong>{interateneo ? 'Corso interateneo · materia e docente liberi' : 'Catalogo materie e docenti in preparazione'}</strong>
         <p>
-          Per {program.name} puoi già caricare e cercare appunti indicando materia e docente. Il piano di studi di
-          questo corso non è pubblicato su unimi.it (corsi interateneo o delle professioni sanitarie): consulta la
-          fonte ufficiale{' '}
+          Per {program.name} puoi già caricare e cercare appunti indicando materia e docente.{' '}
+          {interateneo
+            ? `È un corso interateneo con sede amministrativa presso ${interateneo}: il piano di studi e i docenti sono gestiti dall'ateneo capofila, quindi qui materia e docente restano a inserimento libero. `
+            : 'Il piano di studi di questo corso non è pubblicato in formato strutturato su unimi.it: '}
+          Consulta la fonte ufficiale{' '}
           <a href={`https://www.unimi.it${program.unimiPath}`} rel="noreferrer" target="_blank">
             unimi.it
           </a>
@@ -1301,7 +1317,7 @@ function DegreeCourseCatalog({
       <header className="degree-catalog-head">
         <h2>Materie e docenti del corso</h2>
         <p>
-          {uniqueCourseNames(courses).length} insegnamenti · {teacherCount} docenti — piano didattico ufficiale{' '}
+          {uniqueCourseNames(courses).length} insegnamenti · {teacherCount} docenti censiti fino a 4 A.A. — piano didattico ufficiale{' '}
           <a href={`https://www.unimi.it${program.unimiPath}`} rel="noreferrer" target="_blank">unimi.it</a>, offerta più
           recente. Tocca una materia per cercare i materiali.
         </p>
@@ -1316,28 +1332,63 @@ function DegreeCourseCatalog({
                 <span className="degree-catalog-count">{year.courses.length} attività</span>
               </summary>
               <ul>
-                {year.courses.map((course) => (
-                  <li key={course.id}>
-                    <button onClick={() => onExploreSubject(course.name)} type="button">
-                      <span className="degree-catalog-course">
-                        {course.name}
-                        <small>
-                          {course.cfu ? `${course.cfu} CFU` : null}
-                          {course.cfu && course.ssd ? ' · ' : ''}
-                          {course.ssd ?? ''}
-                          {course.language && course.language !== 'Italiano' ? ` · ${course.language}` : ''}
-                        </small>
-                      </span>
-                      {course.teachers.length ? (
-                        <span className="degree-catalog-teachers">
-                          {course.teachers.map((teacher) => teacher.name).join(' · ')}
+                {year.courses.map((course) => {
+                  const latestTeachers = course.teachers.filter(
+                    (teacher) => teacher.academicYear === course.teachersAcademicYear,
+                  )
+                  const olderByYear = new Map<string, string[]>()
+                  for (const teacher of course.teachers) {
+                    if (teacher.academicYear === course.teachersAcademicYear) continue
+                    const names = olderByYear.get(teacher.academicYear) ?? []
+                    if (!names.includes(teacher.name)) names.push(teacher.name)
+                    olderByYear.set(teacher.academicYear, names)
+                  }
+                  return (
+                    <li key={course.id}>
+                      <button onClick={() => onExploreSubject(course.name)} type="button">
+                        <span className="degree-catalog-course">
+                          {course.name}
+                          <small>
+                            {course.cfu ? `${course.cfu} CFU` : null}
+                            {course.cfu && course.ssd ? ' · ' : ''}
+                            {course.ssd ?? ''}
+                            {course.language && course.language !== 'Italiano' ? ` · ${course.language}` : ''}
+                          </small>
                         </span>
-                      ) : (
-                        <span className="degree-catalog-teachers muted">Docenti non ancora pubblicati</span>
-                      )}
-                    </button>
-                  </li>
-                ))}
+                        {latestTeachers.length ? (
+                          <span className="degree-catalog-teachers">
+                            <span>
+                              {course.teachersAcademicYear && course.teachersAcademicYear !== CATALOG_ACADEMIC_YEAR ? (
+                                <em
+                                  className="degree-catalog-aa"
+                                  title={`Docenti dell'edizione A.A. ${course.teachersAcademicYear}: per l'A.A. corrente non sono ancora stati pubblicati su unimi.it`}
+                                >
+                                  A.A. {course.teachersAcademicYear}
+                                </em>
+                              ) : null}
+                              {latestTeachers.map((teacher) => teacher.name).join(' · ')}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="degree-catalog-teachers muted">Docente A.A. corrente non ancora pubblicato</span>
+                        )}
+                      </button>
+                      {olderByYear.size ? (
+                        <details className="degree-catalog-history">
+                          <summary>Storico docenti · {olderByYear.size} A.A.</summary>
+                          <div>
+                            {[...olderByYear.entries()].map(([academicYear, names]) => (
+                              <p key={academicYear}>
+                                <strong>A.A. {academicYear}</strong>
+                                <span>{names.join(' · ')}</span>
+                              </p>
+                            ))}
+                          </div>
+                        </details>
+                      ) : null}
+                    </li>
+                  )
+                })}
               </ul>
             </details>
           ))}
@@ -1459,8 +1510,9 @@ function LandingPage({
           <div>
             <h2>Tutta la Statale, un corso alla volta</h2>
             <p>
-              UnimiDoc copre i {DEGREE_PROGRAMS.length} corsi di laurea triennale dell’Università degli Studi di
-              Milano. Cerca il tuo corso o sfoglia per area: ogni corso ha la sua pagina dedicata.
+              UnimiDoc copre tutti i {DEGREE_PROGRAMS.length} corsi di laurea triennale e magistrale a ciclo unico
+              dell’Università degli Studi di Milano. Cerca il tuo corso o sfoglia per area: ogni corso ha la sua
+              pagina dedicata.
             </p>
           </div>
           <button className="ghost-button" onClick={() => onRoute('degrees')} type="button">
@@ -3335,6 +3387,7 @@ function FlashcardStudyModal({
   subject,
   title,
   user,
+  reviewNote,
   onClose,
 }: {
   cards: Flashcard[]
@@ -3344,6 +3397,7 @@ function FlashcardStudyModal({
   subject?: string
   title: string
   user?: AppAuthUser | null
+  reviewNote?: string
   onClose: () => void
 }) {
   const [index, setIndex] = useState(0)
@@ -3618,8 +3672,8 @@ function FlashcardStudyModal({
           <div className="study-head-title">
             <GraduationCap size={20} />
             <div>
-              <strong>Studio flashcard</strong>
-              <small>{title || 'Documento'}</small>
+              <strong>{reviewNote ? 'Ripasso mirato' : 'Studio flashcard'}</strong>
+              <small>{title || 'Documento'}{reviewNote ? ` · ${reviewNote}` : ''}</small>
             </div>
           </div>
           <div className="study-top-tabs" aria-label="Sezioni studio">
@@ -5237,7 +5291,9 @@ function UploadPage({
     () =>
       isCatalogDegree
         ? getCourseProfessors(selectedCourse, courseLine)
-        : (dbSelectedCourse?.teachers ?? []).map((teacher) => teacher.name),
+        : (dbSelectedCourse?.teachers ?? [])
+            .filter((teacher) => teacher.academicYear === dbSelectedCourse?.teachersAcademicYear)
+            .map((teacher) => teacher.name),
     [courseLine, selectedCourse, isCatalogDegree, dbSelectedCourse],
   )
   const professorSuggestions = useMemo(
@@ -6653,6 +6709,8 @@ function UserDashboardPage({
     cards: Flashcard[]
     sentences: DocSentence[]
   } | null>(null)
+  const [reviewLoading, setReviewLoading] = useState<string | null>(null)
+  const [reviewMeta, setReviewMeta] = useState<{ scope: ReviewScope; semanticCount: number; total: number } | null>(null)
 
   // Deep-link to a dashboard view via #hash (from navbar / user menu).
   useEffect(() => {
@@ -6742,7 +6800,7 @@ function UserDashboardPage({
   const dataIsLive = Boolean(overlay)
   const flashcardDataIsLive = flashcardDashboard?.source === 'live'
   const firstName = user.name.split(' ')[0] || 'Studente'
-  const flashcardRecords = flashcardDashboard?.records ?? []
+  const flashcardRecords = useMemo(() => flashcardDashboard?.records ?? [], [flashcardDashboard])
   const filteredFlashcardRecords = filterFlashcardRecords(flashcardRecords, flashcardFilters)
   const totalFlashcards = flashcardRecords.length || data.decks.reduce((total, deck) => total + deck.cards, 0)
   const flashcardStats = flashcardRecords.reduce(
@@ -6783,43 +6841,35 @@ function UserDashboardPage({
         ? candidate.documentId === record.documentId
         : candidate.documentTitle === record.documentTitle,
     )
-    const sentences: DocSentence[] = related
-      .filter((candidate) => candidate.page && candidate.sourceQuote)
-      .map((candidate, sentenceIndex) => ({
-        index: sentenceIndex,
-        page: candidate.page!,
-        text: candidate.sourceQuote!,
-        section: candidate.section,
-        kind: 'sentence',
-      }))
-    const sourceIndexByCard = new Map(
-      related
-        .filter((candidate) => candidate.page && candidate.sourceQuote)
-        .map((candidate, sentenceIndex) => [candidate.flashcardId, sentenceIndex]),
-    )
-    setDashboardStudyDeck({
+    setDashboardStudyDeck(recordsToStudyDeck(related, {
       title: record.documentTitle,
+      subject: record.subject,
       documentId: record.documentId,
       author: record.documentAuthor,
-      subject: record.subject,
-      cards: related.map((candidate) => ({
-        id: candidate.flashcardId,
-        front: candidate.question,
-        back: candidate.answer,
-        source: 'concetto',
-        score: candidate.difficulty === 'hard' ? 0.95 : candidate.difficulty === 'easy' ? 0.8 : 0.9,
-        ref: candidate.page && candidate.sourceQuote
-          ? {
-              page: candidate.page,
-              sentenceIndex: sourceIndexByCard.get(candidate.flashcardId) ?? 0,
-              text: candidate.sourceQuote,
-              section: candidate.section,
-            }
-          : null,
-      })),
-      sentences,
-    })
+    }))
   }
+
+  // Avvia un ripasso mirato: mazzo del capitolo/materia (errori prima) espanso
+  // con le card semanticamente vicine via pgvector quando ci sono embedding.
+  const startReviewSession = async (scope: ReviewScope) => {
+    setReviewLoading(scope.label)
+    try {
+      const { records, semanticCount } = await buildSmartChapterDeck(flashcardRecords, scope, 40)
+      const picked = records.length ? records : selectReviewRecords(flashcardRecords, scope, 40)
+      if (!picked.length) return
+      const deck = recordsToStudyDeck(picked, {
+        title: scope.kind === 'chapter' && scope.chapter ? scope.chapter : scope.label,
+        subject: scope.subject ?? picked[0]?.subject ?? 'Ripasso',
+      })
+      setReviewMeta({ scope, semanticCount, total: picked.length })
+      setDashboardStudyDeck(deck)
+    } finally {
+      setReviewLoading(null)
+    }
+  }
+
+  const chapterReviewGroups = useMemo(() => buildChapterReviewGroups(flashcardRecords), [flashcardRecords])
+  const subjectReviewSummaries = useMemo(() => buildSubjectReviewSummaries(flashcardRecords), [flashcardRecords])
 
   return (
     <main className="dashboard-page section-wrap">
@@ -7002,15 +7052,29 @@ function UserDashboardPage({
             <h2>Ripassa i tuoi errori</h2>
             <p>Flashcard persistenti per materia, documento, capitolo e argomento. Gli errori tornano qui finché non li chiudi davvero.</p>
           </div>
-          <span className={`dashboard-live-badge ${flashcardDataIsLive ? 'live' : ''}`}>
-            {flashcardDataIsLive
-              ? 'Live'
-              : flashcardDashboard?.source === 'local'
-                ? 'Locale'
-                : flashcardDashboard?.source === 'demo'
-                  ? 'Demo'
-                  : 'Nessun dato'}
-          </span>
+          <div className="review-head-actions">
+            {flashcardStats.needsReview + flashcardStats.incorrect > 0 ? (
+              <button
+                className="review-start-all"
+                disabled={reviewLoading !== null}
+                onClick={() => startReviewSession({ kind: 'all', label: 'Tutti gli errori' })}
+                type="button"
+              >
+                {reviewLoading === 'Tutti gli errori'
+                  ? (<><Loader2 className="spin" size={15} /> Preparo…</>)
+                  : (<><RefreshCw size={15} /> Ripassa tutti gli errori</>)}
+              </button>
+            ) : null}
+            <span className={`dashboard-live-badge ${flashcardDataIsLive ? 'live' : ''}`}>
+              {flashcardDataIsLive
+                ? 'Live'
+                : flashcardDashboard?.source === 'local'
+                  ? 'Locale'
+                  : flashcardDashboard?.source === 'demo'
+                    ? 'Demo'
+                    : 'Nessun dato'}
+            </span>
+          </div>
         </div>
 
         <div className="flashcard-kpi-grid">
@@ -7036,34 +7100,88 @@ function UserDashboardPage({
           </article>
         </div>
 
-        <div className="mistake-review-grid">
-          {(flashcardDashboard?.errorGroups ?? []).slice(0, 6).map((group) => (
-            <button
-              className="mistake-review-card"
-              key={group.id}
-              onClick={() => {
-                setFlashcardFilters({
-                  ...EMPTY_FLASHCARD_FILTERS,
-                  subject: group.subject,
-                  documentTitle: group.documentTitle,
-                  chapter: group.chapter,
-                  topic: group.topic,
-                  status: 'needs_review',
-                })
-              }}
-              type="button"
-            >
-              <span><SubjectIcon compact name={group.subject} /></span>
-              <div>
-                <strong>{group.subject}</strong>
-                <p>{group.documentTitle}</p>
-                <small>{group.chapter} · {group.topic}</small>
-              </div>
-              <em>{group.incorrect || group.count} errori</em>
-            </button>
-          ))}
-          {!(flashcardDashboard?.errorGroups ?? []).length ? (
-            <p className="dashboard-empty">Non ci sono errori tracciati. Quando studi una card, le risposte sbagliate finiranno qui.</p>
+        {subjectReviewSummaries.length ? (
+          <div className="review-subject-chips" role="list">
+            {subjectReviewSummaries.map((summary) => (
+              <button
+                className="review-subject-chip"
+                disabled={reviewLoading !== null}
+                key={summary.subject}
+                onClick={() => startReviewSession({ kind: 'subject', subject: summary.subject, label: summary.subject })}
+                role="listitem"
+                type="button"
+              >
+                <SubjectIcon compact name={summary.subject} />
+                <span className="review-subject-chip-body">
+                  <strong>{summary.subject}</strong>
+                  <small>{summary.incorrect} errori · {summary.due} da ripassare · {summary.chapters} capitoli</small>
+                </span>
+                {reviewLoading === summary.subject ? <Loader2 className="spin" size={15} /> : <PlayCircle size={16} />}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="review-chapter-grid">
+          {chapterReviewGroups.slice(0, 8).map((group) => {
+            const scope: ReviewScope = {
+              kind: 'chapter',
+              label: `${group.subject} · ${group.chapter}`,
+              subject: group.subject,
+              documentId: group.documentId,
+              documentTitle: group.documentTitle,
+              chapter: group.chapter,
+            }
+            return (
+              <article className="review-chapter-card" key={group.id}>
+                <header>
+                  <span><SubjectIcon compact name={group.subject} /></span>
+                  <div>
+                    <strong>{group.chapter}</strong>
+                    <small>{group.subject} · {group.documentTitle}</small>
+                  </div>
+                </header>
+                <div className="review-chapter-meta">
+                  {group.incorrect > 0 ? <em className="danger">{group.incorrect} sbagliate</em> : null}
+                  {group.due > 0 ? <em className="due">{group.due} in scadenza</em> : null}
+                  {group.accuracy !== null ? <em>{group.accuracy}% accuratezza</em> : null}
+                </div>
+                {group.topics.length ? (
+                  <p className="review-chapter-topics">{group.topics.slice(0, 3).join(' · ')}</p>
+                ) : null}
+                <div className="review-chapter-actions">
+                  <button
+                    className="review-chapter-start"
+                    disabled={reviewLoading !== null}
+                    onClick={() => startReviewSession(scope)}
+                    type="button"
+                  >
+                    {reviewLoading === scope.label
+                      ? (<><Loader2 className="spin" size={14} /> Preparo…</>)
+                      : (<><GraduationCap size={14} /> Ripassa capitolo</>)}
+                  </button>
+                  <button
+                    className="review-chapter-filter"
+                    onClick={() => {
+                      setFlashcardFilters({
+                        ...EMPTY_FLASHCARD_FILTERS,
+                        subject: group.subject,
+                        documentTitle: group.documentTitle,
+                        chapter: group.chapter,
+                        status: 'needs_review',
+                      })
+                      document.querySelector('.flashcard-archive-list')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    }}
+                    type="button"
+                  >
+                    Filtra
+                  </button>
+                </div>
+              </article>
+            )
+          })}
+          {!chapterReviewGroups.length ? (
+            <p className="dashboard-empty">Non ci sono errori tracciati. Quando studi una card, le risposte sbagliate finiranno qui, raggruppate per capitolo.</p>
           ) : null}
         </div>
       </section>
@@ -7535,7 +7653,13 @@ function UserDashboardPage({
           subject={dashboardStudyDeck.subject}
           title={dashboardStudyDeck.title}
           user={user}
-          onClose={() => setDashboardStudyDeck(null)}
+          reviewNote={reviewMeta
+            ? `${reviewMeta.total} card${reviewMeta.semanticCount > 0 ? ` · +${reviewMeta.semanticCount} correlate (pgvector)` : ''}`
+            : undefined}
+          onClose={() => {
+            setDashboardStudyDeck(null)
+            setReviewMeta(null)
+          }}
         />
       ) : null}
     </main>

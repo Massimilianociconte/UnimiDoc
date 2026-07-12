@@ -6,9 +6,14 @@ import { supabase } from './supabaseClient'
 // form di upload per materia e docente. Cache in memoria per sessione: il
 // catalogo cambia al massimo una volta l'anno.
 
+/** A.A. dell'offerta corrente del piano (default seed). I docenti provenienti
+ *  da un'edizione precedente vengono etichettati con il loro A.A. in UI. */
+export const CATALOG_ACADEMIC_YEAR = '2026/2027'
+
 export type DegreeCourseTeacher = {
   name: string
   role: 'responsabile' | 'docente'
+  academicYear: string
 }
 
 export type DegreeCourse = {
@@ -24,6 +29,8 @@ export type DegreeCourse = {
   totalHours: number | null
   language: string | null
   ssd: string | null
+  /** A.A. dell'edizione da cui provengono i docenti (null = non pubblicati). */
+  teachersAcademicYear: string | null
   teachers: DegreeCourseTeacher[]
 }
 
@@ -40,8 +47,10 @@ type DegreeCourseRow = {
   total_hours: number | null
   language: string | null
   ssd: string | null
+  teachers_academic_year: string | null
   degree_course_teachers: Array<{
     role: string
+    academic_year: string
     professors: { full_name: string } | null
   }> | null
 }
@@ -57,7 +66,7 @@ export function loadDegreeCatalog(degreeSlug: string): Promise<DegreeCourse[]> {
     const { data, error } = await supabase
       .from('degree_courses')
       .select(
-        'id, name, unimi_slug, curriculum, year_number, year_label, period, grouping, cfu, total_hours, language, ssd, sort_order, degree_course_teachers(role, professors(full_name))',
+        'id, name, unimi_slug, curriculum, year_number, year_label, period, grouping, cfu, total_hours, language, ssd, teachers_academic_year, sort_order, degree_course_teachers(role, academic_year, professors(full_name))',
       )
       .eq('degree_slug', degreeSlug)
       .order('year_number', { ascending: true })
@@ -76,11 +85,13 @@ export function loadDegreeCatalog(degreeSlug: string): Promise<DegreeCourse[]> {
       totalHours: row.total_hours,
       language: row.language,
       ssd: row.ssd,
+      teachersAcademicYear: row.teachers_academic_year,
       teachers: (row.degree_course_teachers ?? [])
         .filter((entry) => entry.professors?.full_name)
         .map((entry): DegreeCourseTeacher => ({
           name: entry.professors!.full_name,
           role: entry.role === 'responsabile' ? 'responsabile' : 'docente',
+          academicYear: entry.academic_year,
         }))
         // responsabile in testa: è il nome che gli studenti riconoscono
         .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name, 'it') : a.role === 'responsabile' ? -1 : 1)),

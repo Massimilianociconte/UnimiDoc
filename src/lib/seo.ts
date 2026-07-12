@@ -1,5 +1,5 @@
 import { findCourse } from '../courseCatalog'
-import { DEGREE_PROGRAMS, degreeProgramPath, type DegreeProgram } from '../degreePrograms'
+import { DEGREE_PROGRAMS, degreeProgramPath, degreeTypeOf, type DegreeProgram } from '../degreePrograms'
 import type { DocumentItem } from '../data'
 
 // Ogni documento vive su un URL proprio (/appunti/:materia/:titolo) così Google,
@@ -193,10 +193,11 @@ export function degreeSeoTitle(program: DegreeProgram): string {
 
 export function degreeSeoDescription(program: DegreeProgram): string {
   const detail = program.catalogReady
-    ? 'Catalogo completo di materie e docenti del piano di studi, con dispense, schemi ed esercizi verificati dalla community.'
+    ? 'Piano di studi ufficiale con materie e docenti etichettati per anno accademico quando pubblicati, oltre a dispense, schemi ed esercizi verificati dalla community.'
     : 'Carica e trova dispense, riassunti, schemi ed esercizi condivisi dagli studenti del corso, verificati prima della pubblicazione.'
+  const level = degreeTypeOf(program) === 'ciclo-unico' ? 'laurea magistrale a ciclo unico' : 'laurea triennale'
   return (
-    `Appunti per ${program.name} (classe ${program.classe}), laurea triennale` +
+    `Appunti per ${program.name} (classe ${program.classe}), ${level}` +
     `${program.interateneo ? ` interateneo (${program.interateneo})` : ''} dell'Università degli Studi di Milano. ${detail}`
   ).slice(0, 300)
 }
@@ -211,7 +212,7 @@ export function degreeJsonLd(program: DegreeProgram, url: string): Record<string
     courseCode: program.classe,
     description: degreeSeoDescription(program),
     inLanguage: 'it',
-    educationalLevel: 'Laurea triennale',
+    educationalLevel: degreeTypeOf(program) === 'ciclo-unico' ? 'Laurea magistrale a ciclo unico' : 'Laurea triennale',
     provider: {
       '@type': 'CollegeOrUniversity',
       name: 'Università degli Studi di Milano',
@@ -225,8 +226,8 @@ export function degreeCatalogJsonLd(origin: string): Record<string, unknown> {
   return {
     '@context': 'https://schema.org',
     '@type': 'ItemList',
-    name: 'Corsi di laurea triennale — Università degli Studi di Milano',
-    description: 'Tutti i corsi di laurea triennale della Statale di Milano coperti da UnimiDoc.',
+    name: 'Corsi di laurea triennale e a ciclo unico — Università degli Studi di Milano',
+    description: 'Tutti i corsi di laurea triennale e magistrale a ciclo unico della Statale di Milano coperti da UnimiDoc.',
     url: `${origin}/corsi`,
     numberOfItems: DEGREE_PROGRAMS.length,
     itemListElement: DEGREE_PROGRAMS.map((program, index) => ({

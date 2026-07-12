@@ -1,0 +1,7 @@
+__pycache__/
+cache/
+catalog.json
+teachers.partial.json
+scrape_run.log
+sql/
+audit-report.json

@@ -1,18 +1,24 @@
 // ---------------------------------------------------------------------------
-// Catalogo dei corsi di laurea triennale dell'Università degli Studi di Milano
-// (offerta 2025/26 — fonte: unimi.it/it/corsi, verificato luglio 2026).
+// Catalogo dei corsi di laurea triennale e magistrale a ciclo unico
+// dell'Università degli Studi di Milano (offerta 2025/26–2026/27 — fonte:
+// unimi.it/it/corsi, verificato luglio 2026).
 // Le classi contrassegnate "R" sugli ordinamenti riformati sono normalizzate
 // alla classe base (es. "L-18 R" → "L-18"). "Infermieristica pediatrica" è
 // esclusa: in disattivazione progressiva dal 2026/27 (niente nuovi iscritti).
 //
 // Questo registro è la copia frontend della tabella `degree_programs` su
 // Supabase: stessa chiave (slug) e stesso ordinamento (area, poi nome).
-// catalogReady: true = piano di studi con docenti disponibile (Scienze
-// biologiche dal catalogo statico src/courseCatalog.ts; gli altri corsi dalle
-// tabelle degree_courses/professors, importate da unimi.it — vedi
-// tools/unimi-catalog). I corsi senza flag (interatenei con piano presso
-// l'ateneo capofila e professioni sanitarie senza piano su unimi.it) accettano
-// materia e docente in inserimento libero.
+// degreeType distingue le triennali dalle 9 magistrali a ciclo unico (Medicina
+// e chirurgia ×4 poli, Odontoiatria, Veterinaria, Farmacia, CTF,
+// Giurisprudenza). catalogReady: true = piano di studi con docenti disponibile
+// (Scienze biologiche dal catalogo statico src/courseCatalog.ts; gli altri
+// corsi dalle tabelle degree_courses/professors, importate SOLO da unimi.it;
+// vedi tools/unimi-catalog). I corsi senza flag accettano materia e docente in
+// inserimento libero: le 3 triennali interateneo con sede amministrativa fuori
+// Milano (Artificial Intelligence → Pavia, Interpretariato LIS → Milano-Bicocca,
+// impresa casearia → Parma) restano elencate perché co-erogate dalla Statale,
+// ma il loro piano NON viene importato da altri atenei per coerenza di brand;
+// idem infermieristica e ostetricia (nessun piano strutturato su unimi.it).
 // ---------------------------------------------------------------------------
 
 export type DegreeArea =
@@ -24,6 +30,8 @@ export type DegreeArea =
   | 'Giurisprudenza'
   | 'Economia, politica e società'
 
+export type DegreeType = 'triennale' | 'ciclo-unico'
+
 export type DegreeProgram = {
   slug: string
   name: string
@@ -31,6 +39,8 @@ export type DegreeProgram = {
   area: DegreeArea
   /** Percorso ufficiale su unimi.it (provenienza dei dati). */
   unimiPath: string
+  /** Triennale oppure laurea magistrale a ciclo unico. Default: triennale. */
+  degreeType?: DegreeType
   /** Atenei partner per i corsi interateneo. */
   interateneo?: string
   /** Primo anno accademico di attivazione, se successivo al 2025/26. */
@@ -50,10 +60,11 @@ export const DEGREE_AREAS: DegreeArea[] = [
 ]
 
 const P = '/it/corsi/laurea-triennale'
+const CU = '/it/corsi/laurea-magistrale-ciclo-unico'
 
 export const DEGREE_PROGRAMS: DegreeProgram[] = [
   // --- Scienze e tecnologie -----------------------------------------------
-  { slug: 'artificial-intelligence', name: 'Artificial Intelligence', classe: 'L-31', area: 'Scienze e tecnologie', unimiPath: `${P}/artificial-intelligence`, interateneo: 'Università di Pavia · Milano-Bicocca' },
+  { slug: 'artificial-intelligence', name: 'Artificial Intelligence', classe: 'L-31', area: 'Scienze e tecnologie', unimiPath: `${P}/artificial-intelligence`, interateneo: 'Pavia (capofila) · Milano-Bicocca' },
   { slug: 'beni-culturali-scienze-tecnologie-diagnostica', name: 'Beni culturali: scienze, tecnologie e diagnostica', classe: 'L-43', area: 'Scienze e tecnologie', unimiPath: `${P}/beni-culturali-scienze-tecnologie-e-diagnostica`, catalogReady: true },
   { slug: 'biotecnologia', name: 'Biotecnologia', classe: 'L-2', area: 'Scienze e tecnologie', unimiPath: `${P}/biotecnologia`, catalogReady: true },
   { slug: 'chimica', name: 'Chimica', classe: 'L-27', area: 'Scienze e tecnologie', unimiPath: `${P}/chimica`, catalogReady: true },
@@ -103,7 +114,7 @@ export const DEGREE_PROGRAMS: DegreeProgram[] = [
   { slug: 'scienze-produzioni-animali', name: 'Scienze delle produzioni animali', classe: 'L-38', area: 'Agraria e alimentare', unimiPath: `${P}/scienze-delle-produzioni-animali`, catalogReady: true },
   { slug: 'scienze-tecnologie-alimenti-sostenibili', name: 'Scienze e tecnologie per alimenti sostenibili', classe: 'L-26', area: 'Agraria e alimentare', unimiPath: `${P}/scienze-e-tecnologie-alimenti-sostenibili`, catalogReady: true },
   { slug: 'sistemi-digitali-agricoltura', name: 'Sistemi digitali in agricoltura', classe: 'L-P02', area: 'Agraria e alimentare', unimiPath: `${P}/sistemi-digitali-agricoltura`, catalogReady: true },
-  { slug: 'tecnologie-gestione-impresa-casearia', name: "Tecnologie e gestione dell'impresa casearia", classe: 'L-P02', area: 'Agraria e alimentare', unimiPath: `${P}/tecnologie-e-gestione-dellimpresa-casearia-l-p02-interateneo`, interateneo: 'Interateneo' },
+  { slug: 'tecnologie-gestione-impresa-casearia', name: "Tecnologie e gestione dell'impresa casearia", classe: 'L-P02', area: 'Agraria e alimentare', unimiPath: `${P}/tecnologie-e-gestione-dellimpresa-casearia-l-p02-interateneo`, interateneo: 'Parma (capofila)' },
   { slug: 'valorizzazione-tutela-ambiente-territorio-montano', name: "Valorizzazione e tutela dell'ambiente e del territorio montano", classe: 'L-25', area: 'Agraria e alimentare', unimiPath: `${P}/valorizzazione-e-tutela-dellambiente-e-del-territorio-montano`, catalogReady: true },
   { slug: 'viticoltura-enologia', name: 'Viticoltura ed enologia', classe: 'L-25', area: 'Agraria e alimentare', unimiPath: `${P}/viticoltura-ed-enologia`, catalogReady: true },
 
@@ -115,7 +126,7 @@ export const DEGREE_PROGRAMS: DegreeProgram[] = [
   { slug: 'ancient-civilizations-contemporary-world', name: 'Ancient Civilizations for the Contemporary World', classe: 'L-1', area: 'Studi umanistici', unimiPath: `${P}/ancient-civilizations-contemporary-world`, catalogReady: true },
   { slug: 'filosofia', name: 'Filosofia', classe: 'L-5', area: 'Studi umanistici', unimiPath: `${P}/filosofia`, catalogReady: true },
   { slug: 'geografia-ambiente-territorio', name: 'Geografia, ambiente e territorio', classe: 'L-6', area: 'Studi umanistici', unimiPath: `${P}/geografia-ambiente-e-territorio`, catalogReady: true },
-  { slug: 'interpretariato-traduzione-lis-list', name: 'Interpretariato e traduzione in lingua dei segni italiana (LIS) e tattile (LIST)', classe: 'L-20', area: 'Studi umanistici', unimiPath: `${P}/interpretariato-e-traduzione-lingua-dei-segni-italiana-lis-e-lingua-dei`, interateneo: 'Milano-Bicocca' },
+  { slug: 'interpretariato-traduzione-lis-list', name: 'Interpretariato e traduzione in lingua dei segni italiana (LIS) e tattile (LIST)', classe: 'L-20', area: 'Studi umanistici', unimiPath: `${P}/interpretariato-e-traduzione-lingua-dei-segni-italiana-lis-e-lingua-dei`, interateneo: 'Milano-Bicocca (capofila)' },
   { slug: 'lettere', name: 'Lettere', classe: 'L-10', area: 'Studi umanistici', unimiPath: `${P}/lettere`, catalogReady: true },
   { slug: 'lingue-letterature-moderne', name: 'Lingue e letterature moderne', classe: 'L-11', area: 'Studi umanistici', unimiPath: `${P}/lingue-e-letterature-moderne`, catalogReady: true },
   { slug: 'mediazione-linguistica-culturale', name: 'Mediazione linguistica e culturale', classe: 'L-12', area: 'Studi umanistici', unimiPath: `${P}/mediazione-linguistica-e-culturale-applicata-allambito-economico-giuridico-e`, catalogReady: true },
@@ -137,6 +148,17 @@ export const DEGREE_PROGRAMS: DegreeProgram[] = [
   { slug: 'scienze-internazionali-istituzioni-europee-sie', name: 'Scienze internazionali e istituzioni europee (SIE)', classe: 'L-36', area: 'Economia, politica e società', unimiPath: `${P}/scienze-internazionali-e-istituzioni-europee-sie`, catalogReady: true },
   { slug: 'scienze-politiche-spo', name: 'Scienze politiche (SPO)', classe: 'L-36', area: 'Economia, politica e società', unimiPath: `${P}/scienze-politiche-spo`, catalogReady: true },
   { slug: 'scienze-sociali-globalizzazione-glo', name: 'Scienze sociali per la globalizzazione (GLO)', classe: 'L-37', area: 'Economia, politica e società', unimiPath: `${P}/scienze-sociali-la-globalizzazione-glo`, catalogReady: true },
+
+  // --- Lauree magistrali a ciclo unico (offerta 2026/27) --------------------
+  { slug: 'medicina-chirurgia-polo-centrale', name: 'Medicina e chirurgia - Polo Centrale', classe: 'LM-41', area: 'Medicina e professioni sanitarie', unimiPath: `${CU}/medicina-e-chirurgia-polo-centrale`, degreeType: 'ciclo-unico', catalogReady: true },
+  { slug: 'medicina-chirurgia-polo-san-paolo', name: 'Medicina e chirurgia - Polo San Paolo', classe: 'LM-41', area: 'Medicina e professioni sanitarie', unimiPath: `${CU}/medicina-e-chirurgia-polo-san-paolo`, degreeType: 'ciclo-unico', catalogReady: true },
+  { slug: 'medicina-chirurgia-polo-vialba', name: 'Medicina e chirurgia - Polo Vialba', classe: 'LM-41', area: 'Medicina e professioni sanitarie', unimiPath: `${CU}/medicina-e-chirurgia-polo-vialba`, degreeType: 'ciclo-unico', catalogReady: true },
+  { slug: 'medicina-chirurgia-ims', name: 'Medicina e chirurgia - International Medical School', classe: 'LM-41', area: 'Medicina e professioni sanitarie', unimiPath: `${CU}/medicina-e-chirurgia-international-medical-school`, degreeType: 'ciclo-unico', catalogReady: true },
+  { slug: 'odontoiatria-protesi-dentaria', name: 'Odontoiatria e protesi dentaria', classe: 'LM-46', area: 'Medicina e professioni sanitarie', unimiPath: `${CU}/odontoiatria-e-protesi-dentaria`, degreeType: 'ciclo-unico', catalogReady: true },
+  { slug: 'medicina-veterinaria', name: 'Medicina veterinaria', classe: 'LM-42', area: 'Medicina e professioni sanitarie', unimiPath: `${CU}/medicina-veterinaria-ciclo-unico`, degreeType: 'ciclo-unico', catalogReady: true },
+  { slug: 'farmacia', name: 'Farmacia', classe: 'LM-13', area: 'Farmacia e scienze del farmaco', unimiPath: `${CU}/farmacia-ciclo-unico`, degreeType: 'ciclo-unico', catalogReady: true },
+  { slug: 'chimica-tecnologia-farmaceutiche', name: 'Chimica e tecnologia farmaceutiche', classe: 'LM-13', area: 'Farmacia e scienze del farmaco', unimiPath: `${CU}/chimica-e-tecnologia-farmaceutiche-ciclo-unico`, degreeType: 'ciclo-unico', catalogReady: true },
+  { slug: 'giurisprudenza', name: 'Giurisprudenza', classe: 'LMG/01', area: 'Giurisprudenza', unimiPath: `${CU}/giurisprudenza-ciclo-unico`, degreeType: 'ciclo-unico', catalogReady: true },
 ]
 
 export const DEFAULT_DEGREE_SLUG = 'scienze-biologiche'
@@ -167,4 +189,13 @@ export function degreeProgramsByArea(): Array<{ area: DegreeArea; programs: Degr
     area,
     programs: DEGREE_PROGRAMS.filter((program) => program.area === area),
   }))
+}
+
+export function degreeTypeOf(program: DegreeProgram): DegreeType {
+  return program.degreeType ?? 'triennale'
+}
+
+/** Etichetta breve per il tipo di corso, usata nei badge di /corsi. */
+export function degreeTypeLabel(program: DegreeProgram): string {
+  return degreeTypeOf(program) === 'ciclo-unico' ? 'Ciclo unico' : 'Triennale'
 }

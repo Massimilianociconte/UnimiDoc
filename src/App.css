@@ -6496,6 +6496,30 @@ button {
   color: var(--primary-dark);
 }
 
+.degree-chip-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #6d28d9;
+  background: #f3ecff;
+  vertical-align: middle;
+}
+
+.degree-chip.ciclo-unico:hover {
+  border-color: rgba(109, 40, 217, 0.4);
+}
+
+.degree-chip-badge.interateneo {
+  color: #9a3412;
+  background: #fff1e6;
+}
+
 /* Pagine /corsi e /corsi/:slug */
 .degree-page {
   display: grid;
@@ -7306,6 +7330,195 @@ button.dashboard-stat:hover {
   font-style: normal;
   font-weight: 900;
   white-space: nowrap;
+}
+
+/* --- Centro ripasso: materie, capitoli e ripasso intelligente pgvector --- */
+.review-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.review-start-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 15px;
+  font-weight: 800;
+  font-size: 13px;
+  color: #fff;
+  background: var(--view-tone, #7c3aed);
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+}
+
+.review-start-all:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 26px rgba(124, 58, 237, 0.28);
+}
+
+.review-start-all:disabled { opacity: 0.6; cursor: progress; }
+
+.review-subject-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.review-subject-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 8px 12px;
+  background: #fff;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.review-subject-chip:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--view-tone, #7c3aed) 40%, var(--border));
+  box-shadow: 0 12px 26px rgba(12, 45, 31, 0.08);
+}
+
+.review-subject-chip:disabled { opacity: 0.65; cursor: progress; }
+
+.review-subject-chip-body { display: flex; flex-direction: column; }
+.review-subject-chip-body strong { font-weight: 800; color: var(--text-strong); font-size: 13px; }
+.review-subject-chip-body small { color: var(--muted); font-size: 11.5px; }
+.review-subject-chip .spin { color: var(--view-tone, #7c3aed); }
+
+.review-chapter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.review-chapter-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px;
+  background: #fff;
+}
+
+.review-chapter-card header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.review-chapter-card header > span {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--view-tone, #7c3aed) 12%, #fff);
+}
+
+.review-chapter-card header strong {
+  display: block;
+  font-weight: 800;
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-chapter-card header small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-chapter-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.review-chapter-meta em {
+  font-style: normal;
+  font-weight: 800;
+  font-size: 11.5px;
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: var(--muted);
+  background: var(--surface-2, #f4f6f5);
+}
+
+.review-chapter-meta em.danger { color: #b42318; background: #fff4f2; }
+.review-chapter-meta em.due { color: #92500a; background: #fff7ec; }
+
+.review-chapter-topics {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.review-chapter-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.review-chapter-start {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 11px;
+  padding: 9px 10px;
+  font-weight: 800;
+  font-size: 12.5px;
+  color: #fff;
+  background: var(--view-tone, #7c3aed);
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+}
+
+.review-chapter-start:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(124, 58, 237, 0.26);
+}
+
+.review-chapter-start:disabled { opacity: 0.6; cursor: progress; }
+
+.review-chapter-filter {
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 9px 12px;
+  font-weight: 700;
+  font-size: 12.5px;
+  color: var(--text);
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.16s ease;
+}
+
+.review-chapter-filter:hover { border-color: color-mix(in srgb, var(--view-tone, #7c3aed) 40%, var(--border)); }
+
+@media (max-width: 720px) {
+  .review-chapter-grid { grid-template-columns: 1fr; }
 }
 
 .flashcard-filter-grid {
@@ -11006,6 +11219,8 @@ button.dashboard-stat:hover {
 }
 
 .degree-catalog-teachers {
+  display: grid;
+  gap: 3px;
   min-width: 0;
   color: var(--primary);
   font-size: 0.84rem;
@@ -11013,14 +11228,71 @@ button.dashboard-stat:hover {
   overflow-wrap: anywhere;
 }
 
+.degree-catalog-history {
+  margin: -3px 10px 7px;
+  border-left: 2px solid rgba(22, 104, 69, 0.16);
+  padding: 2px 0 2px 10px;
+}
+
+.degree-catalog-history summary {
+  width: max-content;
+  max-width: 100%;
+  cursor: pointer;
+  color: var(--text-soft);
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.degree-catalog-history div {
+  display: grid;
+  gap: 5px;
+  margin-top: 7px;
+  padding: 0 0 4px;
+}
+
+.degree-catalog-history p {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 7px;
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.74rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.degree-catalog-history p strong {
+  color: #92500a;
+  font-size: inherit;
+}
+
 .degree-catalog-teachers.muted {
   color: var(--text-soft);
   font-weight: 500;
 }
 
+.degree-catalog-aa {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-style: normal;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #92500a;
+  background: #fff7ec;
+  white-space: nowrap;
+  cursor: help;
+}
+
 @media (max-width: 640px) {
   .degree-catalog li button {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .degree-catalog-history p {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1px;
   }
 }
 

@@ -1,22 +1,27 @@
 # UnimiDoc
 
 > Piattaforma indipendente di appunti verificati per i corsi di laurea triennale
-> dell'Università degli Studi di Milano ("La Statale"). Gli studenti caricano
-> dispense, schemi, esercizi svolti e domande d'esame; la community li verifica e
-> li valuta. Ogni documento ha una scheda pubblica dedicata con materia, docente,
-> anno accademico, numero di pagine e valutazione. 67 dei 72 corsi triennali
-> della Statale hanno il catalogo completo del piano di studi con materie
-> (anno, CFU, SSD) e docenti ufficiali da unimi.it; i restanti 5 (interatenei
-> con sede amministrativa altrove e professioni sanitarie senza piano
+> e magistrale a ciclo unico dell'Università degli Studi di Milano ("La Statale").
+> Gli studenti caricano dispense, schemi, esercizi svolti e domande d'esame; la
+> community li verifica e li valuta. Ogni documento ha una scheda pubblica
+> dedicata con materia, docente, anno accademico, numero di pagine e valutazione.
+> Sono coperti tutti gli 81 corsi (72 triennali + 9 magistrali a ciclo unico:
+> Medicina e chirurgia nei quattro poli, Odontoiatria, Medicina veterinaria,
+> Farmacia, CTF, Giurisprudenza). 76 hanno il piano di studi strutturato con
+> materie (anno, CFU, SSD) e i docenti ufficiali disponibili, sempre etichettati
+> con l'anno accademico della fonte UniMi; i restanti
+> 5 (corsi interateneo con sede amministrativa presso un altro ateneo — Pavia,
+> Milano-Bicocca, Parma — e due professioni sanitarie senza piano strutturato
 > pubblicato) accettano caricamenti con materia e docente indicati dallo
-> studente.
+> studente. I corsi interateneo restano elencati perché co-erogati dalla Statale,
+> ma non ne importiamo il piano da altri atenei.
 
 UnimiDoc non è affiliata con l'Università degli Studi di Milano.
 
 ## Pagine principali
 
 - [Esplora appunti](https://unimidoc.netlify.app/app): catalogo filtrabile per materia e docente
-- [Corsi di laurea](https://unimidoc.netlify.app/corsi): tutti i 72 corsi triennali della Statale, per area disciplinare
+- [Corsi di laurea](https://unimidoc.netlify.app/corsi): tutti gli 81 corsi triennali e a ciclo unico della Statale, per area disciplinare
 - [Premium](https://unimidoc.netlify.app/premium): anteprime complete e download senza attese
 - [Carica appunti](https://unimidoc.netlify.app/upload): upload con revisione e crediti di ricompensa
 - [Privacy](https://unimidoc.netlify.app/privacy): dati, finalità, conservazione e diritti
