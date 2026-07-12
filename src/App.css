@@ -6288,6 +6288,7 @@ button {
   align-items: center;
   border-radius: 8px;
   padding: 30px 36px;
+  scroll-margin-top: 90px;
   background:
     linear-gradient(120deg, rgba(232, 248, 239, 0.95), rgba(255, 253, 246, 0.94)),
     #f4fcf7;
@@ -6361,6 +6362,7 @@ button {
   position: sticky;
   top: 66px;
   z-index: 18;
+  scroll-margin-top: 90px;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
