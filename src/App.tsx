@@ -3583,6 +3583,8 @@ function ImageOcclusionLab({ analysis, premium }: { analysis?: PdfAnalysis | nul
   const [aiBusy, setAiBusy] = useState(false)
   const activePage = visualPages.find((page) => page.page === selectedPage) ?? visualPages[0]
   const activeMasks = masks.filter((mask) => mask.page === activePage.page)
+  const activeMaskIndex = Math.max(0, activeMasks.findIndex((mask) => mask.id === selectedMaskId))
+  const activeCard = activeMasks[activeMaskIndex] ?? null
 
   useEffect(() => {
     setSelectedPage(firstVisualPage)
@@ -3983,40 +3985,57 @@ function ImageOcclusionLab({ analysis, premium }: { analysis?: PdfAnalysis | nul
             Coordinate salvate in percentuale: il backend può ricostruire la maschera anche se la pagina viene
             mostrata a dimensioni diverse.
           </p>
-          {activeMasks.length ? activeMasks.map((mask, index) => {
-            const selected = mask.id === selectedMaskId
-            const label = mask.label || `${index + 1}`
-            const answer = mask.answer || `Struttura ${index + 1}`
-            return (
-              <article className={`occlusion-study-card ${selected ? 'selected' : ''}`} key={mask.id}>
+          {activeCard ? (
+            <div className="occlusion-carousel">
+              <div className="occlusion-carousel-top">
+                <button
+                  aria-label="Card precedente"
+                  disabled={activeMaskIndex === 0}
+                  onClick={() => setSelectedMaskId(activeMasks[Math.max(0, activeMaskIndex - 1)].id)}
+                  type="button"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <div>
+                  <strong>Card {activeMaskIndex + 1} di {activeMasks.length}</strong>
+                  <span>{activeMasks.filter((m) => m.label.trim() && m.answer.trim()).length} complete</span>
+                </div>
+                <button
+                  aria-label="Card successiva"
+                  disabled={activeMaskIndex === activeMasks.length - 1}
+                  onClick={() => setSelectedMaskId(activeMasks[Math.min(activeMasks.length - 1, activeMaskIndex + 1)].id)}
+                  type="button"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+
+              <article className="occlusion-study-card selected">
                 <div className="occlusion-card-top">
-                  <button className="occlusion-card-index" onClick={() => setSelectedMaskId(mask.id)} type="button">{index + 1}</button>
+                  <span className="occlusion-card-index">{activeMaskIndex + 1}</span>
                   <div>
                     <span>Flashcard visuale</span>
-                    <strong>{answer}</strong>
+                    <strong>{activeCard.answer || `Struttura ${activeMaskIndex + 1}`}</strong>
                   </div>
-                  <button className="occlusion-focus-button" onClick={() => setSelectedMaskId(mask.id)} type="button">
-                    <Eye size={14} /> Evidenzia
-                  </button>
                 </div>
 
                 <div className="occlusion-study-prompt">
                   <span>Domanda</span>
-                  <p>Quale struttura è indicata dall’area {label}?</p>
+                  <p>Quale struttura è indicata dall’area {activeCard.label || `${activeMaskIndex + 1}`}?</p>
                 </div>
 
                 <div className="occlusion-fields">
                   <label>
                     Etichetta
-                    <input onChange={(event) => updateMask(mask.id, { label: event.target.value })} value={mask.label} />
+                    <input onChange={(event) => updateMask(activeCard.id, { label: event.target.value })} value={activeCard.label} />
                   </label>
                   <label>
                     Risposta
-                    <input onChange={(event) => updateMask(mask.id, { answer: event.target.value })} value={mask.answer} />
+                    <input onChange={(event) => updateMask(activeCard.id, { answer: event.target.value })} value={activeCard.answer} />
                   </label>
                   <label className="field-wide">
                     Hint
-                    <input onChange={(event) => updateMask(mask.id, { hint: event.target.value })} value={mask.hint} />
+                    <input onChange={(event) => updateMask(activeCard.id, { hint: event.target.value })} value={activeCard.hint} />
                   </label>
                 </div>
 
@@ -4029,24 +4048,40 @@ function ImageOcclusionLab({ analysis, premium }: { analysis?: PdfAnalysis | nul
                         <input
                           max={100}
                           min={0}
-                          onChange={(event) => updateMaskPercent(mask.id, key, event.target.value)}
+                          onChange={(event) => updateMaskPercent(activeCard.id, key, event.target.value)}
                           step={1}
                           type="number"
-                          value={Math.round(mask[key] * 100)}
+                          value={Math.round(activeCard[key] * 100)}
                         />
                       </label>
                     ))}
                   </div>
-                  <small>x {Math.round(mask.x * 100)}% · y {Math.round(mask.y * 100)}% · w {Math.round(mask.width * 100)}% · h {Math.round(mask.height * 100)}%</small>
+                  <small>
+                    x {Math.round(activeCard.x * 100)}% · y {Math.round(activeCard.y * 100)}% · w {Math.round(activeCard.width * 100)}% · h {Math.round(activeCard.height * 100)}%
+                  </small>
                 </details>
 
                 <div className="occlusion-card-actions">
                   <span><CheckCircle2 size={14} /> Quiz pronto</span>
-                  <button onClick={() => removeMask(mask.id)} type="button"><Trash2 size={14} /> Elimina</button>
+                  <button onClick={() => removeMask(activeCard.id)} type="button"><Trash2 size={14} /> Elimina</button>
                 </div>
               </article>
-            )
-          }) : (
+
+              <div className="occlusion-rail" aria-label="Naviga le maschere">
+                {activeMasks.map((mask, index) => (
+                  <button
+                    className={`${mask.id === selectedMaskId ? 'active' : ''} ${mask.label.trim() && mask.answer.trim() ? 'complete' : 'incomplete'}`}
+                    key={mask.id}
+                    onClick={() => setSelectedMaskId(mask.id)}
+                    title={mask.answer || mask.label || `Card ${index + 1}`}
+                    type="button"
+                  >
+                    <span>{index + 1}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
             <p className="occlusion-empty">Clicca sulla pagina o usa “Maschera” per creare la prima card visuale.</p>
           )}
         </div>
@@ -5780,7 +5815,7 @@ function UploadPage({
               <legend><span className="upload-step-badge">1</span> Informazioni essenziali</legend>
               <div className="form-grid refined">
                 <label className="field-wide">
-                  Titolo <em className="field-required">obbligatorio</em>
+                  <span className="field-label-row">Titolo <em className="field-required">obbligatorio</em></span>
                   <input
                     maxLength={180}
                     onChange={(event) => setTitle(event.target.value)}
@@ -5790,7 +5825,7 @@ function UploadPage({
                   <small className="field-counter">{title.trim().length}/180 · minimo 3 caratteri</small>
                 </label>
                 <label className="field-wide">
-                  Materia <em className="field-required">obbligatorio</em>
+                  <span className="field-label-row">Materia <em className="field-required">obbligatorio</em></span>
                   <select onChange={(event) => setSubject(event.target.value)} value={subject}>
                     {subjects.map((option) => (
                       <option key={option}>{option}</option>
@@ -5826,7 +5861,7 @@ function UploadPage({
                     </select>
                   </label>
                   <label>
-                    Docente <em className="field-required">obbligatorio</em>
+                    <span className="field-label-row">Docente <em className="field-required">obbligatorio</em></span>
                     <input
                       list="upload-professor-suggestions"
                       onChange={(event) => setProfessor(event.target.value)}
@@ -5905,7 +5940,7 @@ function UploadPage({
 
             <fieldset className="upload-fieldset">
               <legend><span className="upload-step-badge">3</span> Presentazione</legend>
-              <div className="form-grid refined">
+              <div className="form-grid refined fieldset-stacked">
                 <label className="field-wide">
                   Descrizione pubblica
                   <textarea
@@ -5918,7 +5953,9 @@ function UploadPage({
                   <small className="field-counter">{description.length}/2000</small>
                 </label>
                 <label className="field-wide">
-                  Tag e parole chiave <em className="field-optional">(opzionale · compilati in automatico)</em>
+                  <span className="field-label-row">
+                    Tag e parole chiave <em className="field-optional">opzionale · compilati in automatico</em>
+                  </span>
                   <input
                     onChange={(event) => setTagsInput(event.target.value)}
                     placeholder="Es. mitosi, ciclo cellulare, DNA"
