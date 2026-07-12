@@ -3782,8 +3782,15 @@ button {
 }
 
 .upload-hint {
+  display: block;
+  margin-top: 10px;
   color: var(--muted);
   text-align: center;
+  line-height: 1.45;
+}
+
+.upload-hint + .upload-hint {
+  margin-top: 6px;
 }
 
 .upload-success {

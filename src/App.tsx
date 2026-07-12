@@ -5984,14 +5984,12 @@ function UploadPage({
           </button>
           {!remoteUploadEnabled && !user?.isDemo ? (
             <small className="upload-hint" role="status">
-              Nuovi caricamenti temporaneamente in pausa finché il worker di verifica PDF non è operativo.
+              Nuovi caricamenti temporaneamente in pausa finché il worker di verifica PDF non è operativo: il file
+              resta soltanto nella bozza locale e non viene inviato.
             </small>
-          ) : null}
-          {phase === 'ready' && !canPublish ? (
+          ) : phase === 'ready' && !canPublish ? (
             <small className="upload-hint">
-              {!remoteUploadEnabled && !user?.isDemo
-                ? 'Il file resta soltanto nella bozza locale e non viene inviato.'
-                : file
+              {file
                 ? 'Completa titolo, docente e dichiarazione per inviare.'
                 : 'Questa è una bozza locale: ricarica il file originale per inviare in revisione.'}
             </small>
