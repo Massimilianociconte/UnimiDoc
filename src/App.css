@@ -2450,6 +2450,7 @@ button {
 .upload-form-card label {
   display: grid;
   gap: 8px;
+  align-content: start;
   color: var(--text-strong);
   font-weight: 800;
 }
@@ -2464,9 +2465,22 @@ button {
   background: #fff;
 }
 
+.upload-form-card textarea {
+  min-height: 110px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: var(--text-strong);
+  background: #fff;
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+
 .auth-panel input:focus,
 .upload-form-card input:focus,
-.upload-form-card select:focus {
+.upload-form-card select:focus,
+.upload-form-card textarea:focus {
   outline: 3px solid rgba(22, 104, 69, 0.12);
   border-color: rgba(22, 104, 69, 0.45);
 }
@@ -3099,12 +3113,19 @@ button {
 .rights-check {
   display: flex !important;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  margin: 6px 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: #fff;
+  line-height: 1.45;
 }
 
 .rights-check input {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
   accent-color: var(--primary);
 }
 
@@ -6652,8 +6673,9 @@ button {
 /* Sync indicator on the profile card */
 .dashboard-sync {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 7px;
+  gap: 3px 7px;
 }
 
 .dashboard-sync-dot {
@@ -8823,9 +8845,8 @@ button.dashboard-stat:hover {
 
 .dashboard-profile-card p,
 .dashboard-profile-card small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 900px) {
