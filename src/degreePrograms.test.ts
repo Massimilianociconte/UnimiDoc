@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { DEGREE_PROGRAMS, degreeTypeOf } from './degreePrograms'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { DEGREE_PROGRAMS, degreeProgramIconPath, degreeTypeOf } from './degreePrograms'
 
 const WITHOUT_STRUCTURED_PLAN = [
   'artificial-intelligence',
@@ -31,5 +33,15 @@ describe('registro corsi UniMi', () => {
       'interpretariato-traduzione-lis-list',
       'tecnologie-gestione-impresa-casearia',
     ])
+  })
+
+  it('associa a ogni corso una singola icona WebP locale', () => {
+    const iconPaths = DEGREE_PROGRAMS.map(degreeProgramIconPath)
+
+    expect(new Set(iconPaths).size).toBe(DEGREE_PROGRAMS.length)
+    for (const iconPath of iconPaths) {
+      expect(iconPath).toMatch(/^\/degree-icons\/[a-z0-9-]+\.webp$/)
+      expect(existsSync(resolve(process.cwd(), 'public', iconPath.slice(1)))).toBe(true)
+    }
   })
 })
