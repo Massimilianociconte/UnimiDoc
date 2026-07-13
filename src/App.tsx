@@ -89,6 +89,7 @@ import {
 import { documentTypes, initialDocuments, professors, subjects, type DocumentItem } from './data'
 import { DEFAULT_FREE_FLASHCARD_LIMIT, DEFAULT_PREMIUM_FLASHCARD_LIMIT } from './lib/flashcardConfig'
 import {
+  deleteDocument,
   getSupabaseAccessToken,
   getSupabaseSessionUser,
   getUserCreditBalance,
@@ -5217,7 +5218,9 @@ function UploadPage({
   onPublish: (document: DocumentItem) => number
   user: AppAuthUser | null
 }) {
-  const remoteUploadEnabled = import.meta.env.VITE_DOCUMENT_UPLOAD_ENABLED === 'true'
+  // Live document upload is enabled by default now that the PDF worker runs in
+  // production. Set VITE_DOCUMENT_UPLOAD_ENABLED=false to disable (e.g. staging).
+  const remoteUploadEnabled = import.meta.env.VITE_DOCUMENT_UPLOAD_ENABLED !== 'false'
   const draftOwnerId = user?.id ?? 'anonymous'
   const [restoredDraft, setRestoredDraft] = useState<UploadReaderDraft | null>(() => loadUploadReaderDraft(draftOwnerId))
   const [file, setFile] = useState<File | null>(null)
@@ -6801,6 +6804,27 @@ function UserDashboardPage({
   } | null>(null)
   const [reviewLoading, setReviewLoading] = useState<string | null>(null)
   const [reviewMeta, setReviewMeta] = useState<{ scope: ReviewScope; semanticCount: number; total: number } | null>(null)
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null)
+
+  const handleDeleteDocument = async (documentId: string, title: string) => {
+    if (deletingDocId) return
+    const confirmed = typeof window !== 'undefined' && window.confirm(
+      `Eliminare "${title}"?\n\nSe è già stato acquistato resta disponibile a chi lo ha comprato ma esce dal catalogo; altrimenti viene rimosso definitivamente insieme ai file collegati.`,
+    )
+    if (!confirmed) return
+    setDeletingDocId(documentId)
+    setLiveError('')
+    try {
+      await deleteDocument(documentId)
+      setOverlay((prev) => (prev
+        ? { ...prev, processingDocuments: prev.processingDocuments.filter((doc) => doc.id !== documentId) }
+        : prev))
+    } catch (error) {
+      setLiveError(error instanceof Error ? error.message : 'Eliminazione non riuscita.')
+    } finally {
+      setDeletingDocId(null)
+    }
+  }
 
   // Deep-link to a dashboard view via route/hash (from navbar / user menu).
   useEffect(() => {
@@ -7280,6 +7304,16 @@ function UserDashboardPage({
                         <small>{document.subject} · aggiornato {relativeDashboardTime(document.updatedAt)}</small>
                       </div>
                       <em>{isFailed ? 'Richiede attenzione' : isReady ? 'Pronto' : document.analysisStatus === 'queued' ? 'In coda' : 'In elaborazione'}</em>
+                      <button
+                        className="dashboard-processing-delete"
+                        onClick={() => void handleDeleteDocument(document.id, document.title)}
+                        disabled={deletingDocId === document.id}
+                        type="button"
+                        aria-label={`Elimina ${document.title}`}
+                        title="Elimina documento"
+                      >
+                        <Trash2 size={15} />
+                      </button>
                     </div>
                     <div className="dashboard-processing-progress" aria-label={`Avanzamento ${document.analysisProgress}%`}>
                       <span style={{ width: `${document.analysisProgress}%` }} />

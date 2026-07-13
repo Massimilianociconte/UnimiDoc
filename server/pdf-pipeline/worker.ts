@@ -9,6 +9,7 @@ import { log, logError, createJobLogger, logJobMetric } from './logger.ts'
 import { PdfArtifactStore } from './persistence.js'
 import { PdfJobQueue } from './queue.js'
 import { executePdfStage } from './stages.js'
+import { drainStorageCleanupQueue } from './storage-gc.js'
 import type { ClaimedPdfJob } from './types.js'
 
 type WorkerRuntime = {
@@ -178,6 +179,23 @@ async function workerSlot(runtime: WorkerRuntime, slot: number, once: boolean): 
   }
 }
 
+async function runStorageGcOnce(runtime: WorkerRuntime): Promise<void> {
+  try {
+    const result = await drainStorageCleanupQueue(runtime.supabase, { onLog: (event, detail) => log(event, detail) })
+    if (result.scanned > 0) log('storage_gc_drained', result)
+  } catch (error) {
+    log('storage_gc_failed', { error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
+async function storageGcLoop(runtime: WorkerRuntime): Promise<void> {
+  const intervalMs = Number(process.env.STORAGE_GC_INTERVAL_MS) || 300_000
+  while (!runtime.shutdown.aborted) {
+    await runStorageGcOnce(runtime)
+    await abortableDelay(intervalMs, runtime.shutdown)
+  }
+}
+
 export async function runPdfWorker(input: { once?: boolean; env?: NodeJS.ProcessEnv } = {}): Promise<void> {
   const config = loadWorkerConfig(input.env)
   await mkdir(config.tempRoot, { recursive: true, mode: 0o700 })
@@ -217,7 +235,10 @@ export async function runPdfWorker(input: { once?: boolean; env?: NodeJS.Process
     { length: input.once ? 1 : config.concurrency },
     (_, index) => workerSlot(runtime, index, input.once === true),
   )
-  await Promise.all(slots)
+  // Storage GC drains orphaned objects left by hard-deleted documents. One pass
+  // in --once mode, otherwise a periodic loop alongside the job slots.
+  const maintenance = input.once ? runStorageGcOnce(runtime) : storageGcLoop(runtime)
+  await Promise.all([...slots, maintenance])
   log('pdf_worker_stopped', { workerId: config.workerId })
 }
 

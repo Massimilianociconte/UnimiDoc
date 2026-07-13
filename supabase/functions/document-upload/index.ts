@@ -14,13 +14,13 @@ import { createRequestLogger } from '../_shared/log.ts'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const PDF_PIPELINE_VERSION = (globalThis as { Deno?: { env?: { get(key: string): string | undefined } } }).Deno?.env?.get('PDF_PIPELINE_VERSION')?.trim() || 'pdf-worker-v1'
-// New uploads are unsafe without a live consumer: drafts would remain queued
-// indefinitely. Activation is an explicit post-deploy operator step.
+// The PDF worker runs in production, so live uploads are enabled by default.
+// Set PDF_WORKER_ENABLED=false to pause new uploads (e.g. during worker
+// maintenance) — otherwise drafts would remain queued without a live consumer.
 //
 // FOLLOW THE RUNBOOK: docs/PDF_WORKER_RUNBOOK.md
-// - Set PDF_WORKER_ENABLED=true only after worker is running and smoke tested
 // - Keep PDF_PIPELINE_VERSION in sync between Edge and worker
-const PDF_WORKER_ENABLED = (globalThis as { Deno?: { env?: { get(key: string): string | undefined } } }).Deno?.env?.get('PDF_WORKER_ENABLED') === 'true'
+const PDF_WORKER_ENABLED = (globalThis as { Deno?: { env?: { get(key: string): string | undefined } } }).Deno?.env?.get('PDF_WORKER_ENABLED') !== 'false'
 
 const clean = (value: unknown, fallback = '') => String(value ?? fallback).trim()
 

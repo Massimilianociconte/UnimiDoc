@@ -268,6 +268,7 @@ export async function loadOwnedDocuments(userId: string): Promise<DocumentItem[]
     .from('documents')
     .select('id, owner_id, title, course_name, professor, academic_year, page_count, language, preview_policy, description, exam_type, semester, degree_course, degree_slug, university, tags, compatible_exams, insights, price_credits, created_at, updated_at, visibility, original_size_bytes')
     .eq('owner_id', userId)
+    .neq('visibility', 'withdrawn')
     .order('created_at', { ascending: false })
   if (error) throw error
   return ((data ?? []) as unknown as CatalogRow[]).map((row) => mapCatalogDocument(row, 'Tu', true))
@@ -287,6 +288,28 @@ export async function purchaseDocument(documentId: string): Promise<DocumentPurc
   }
   if (!data) throw new Error('Il server non ha confermato l’acquisto.')
   return data as DocumentPurchase
+}
+
+export type DeleteDocumentResult = { mode: 'soft' | 'hard'; document_id: string; active_buyers?: number }
+
+/**
+ * Delete a document the caller owns. The server decides the mode: a document
+ * with active purchases from other users is soft-deleted (withdrawn from the
+ * catalogue, buyers keep access), otherwise it is hard-deleted and its Storage
+ * objects are queued for garbage collection. Never delete rows from the UI.
+ */
+export async function deleteDocument(documentId: string): Promise<DeleteDocumentResult> {
+  if (!supabase) throw new Error('Eliminazione non configurata.')
+  const { data, error } = await supabase.rpc('delete_document', { p_document_id: documentId })
+  if (error) {
+    const detail = `${error.code ?? ''} ${error.message ?? ''} ${error.details ?? ''}`.toLowerCase()
+    if (detail.includes('not_document_owner')) throw new Error('Puoi eliminare solo i tuoi documenti.')
+    if (detail.includes('document_not_found')) throw new Error('Documento non trovato o già eliminato.')
+    if (detail.includes('auth_required')) throw new Error('Accedi per eliminare un documento.')
+    throw new Error('Eliminazione non completata. Riprova.')
+  }
+  if (!data) throw new Error('Il server non ha confermato l’eliminazione.')
+  return data as DeleteDocumentResult
 }
 
 export function subscribeSupabaseAuth(onUser: (user: AppAuthUser | null) => void) {

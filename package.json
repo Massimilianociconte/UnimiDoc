@@ -12,7 +12,8 @@
     "typecheck:worker": "tsc -p tsconfig.worker.json",
     "worker:pdf": "tsx server/pdf-pipeline/worker.ts",
     "worker:pdf:once": "tsx server/pdf-pipeline/worker.ts --once",
-    "worker:pdf:reconcile": "tsx scripts/reconcile-pdf-jobs.ts"
+    "worker:pdf:reconcile": "tsx scripts/reconcile-pdf-jobs.ts",
+    "gc:storage": "tsx scripts/gc-storage.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.0",

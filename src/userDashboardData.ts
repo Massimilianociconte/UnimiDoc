@@ -484,7 +484,9 @@ export async function loadDashboardLiveOverlay(user: AppAuthUser): Promise<Dashb
       dueAt: relativeTimeLabel(row.due_at),
       priority: row.priority === 'high' ? 'alta' : row.priority === 'low' ? 'bassa' : 'media',
     })),
-    processingDocuments: (snapshot.owned_documents ?? []).map((row) => ({
+    processingDocuments: (snapshot.owned_documents ?? [])
+      .filter((row) => row.visibility !== 'withdrawn')
+      .map((row) => ({
       id: row.id,
       title: row.title,
       subject: row.course_name,
