@@ -2716,6 +2716,10 @@ button {
   gap: 30px;
 }
 
+.dashboard-page {
+  padding-bottom: calc(clamp(40px, 6vw, 72px) + env(safe-area-inset-bottom, 0px));
+}
+
 .premium-hero,
 .upload-hero,
 .library-hero {
