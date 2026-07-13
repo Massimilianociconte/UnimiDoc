@@ -8585,7 +8585,7 @@ button.dashboard-stat:hover {
   }
 
   .app-header .user-menu {
-    position: static;
+    position: relative;
   }
 
   .app-header .user-dropdown {
