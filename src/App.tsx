@@ -615,7 +615,7 @@ function nextRouteAfterAuth() {
   if (!nextPath) return 'dashboard' as Route
 
   const nextRoute = routeFromPathname(nextPath)
-  return nextRoute === 'login' || nextRoute === 'signup' || nextRoute === 'landing' ? 'dashboard' : nextRoute
+  return nextRoute === 'login' || nextRoute === 'signup' ? 'dashboard' : nextRoute
 }
 
 function useRotatingCourseName() {
@@ -772,6 +772,7 @@ function Header({
   credits,
   user,
   onRoute,
+  onAuth,
   onSearch,
   onSignOut,
 }: {
@@ -779,7 +780,8 @@ function Header({
   isLoggedIn: boolean
   credits: number
   user: AppAuthUser | null
-  onRoute: (route: Route, options?: { hash?: string }) => void
+  onRoute: (route: Route, options?: { hash?: string; search?: string }) => void
+  onAuth: (mode: AuthMode, nextPath?: string) => void
   onSearch: (query: string) => void
   onSignOut: () => void
 }) {
@@ -916,9 +918,12 @@ function Header({
                 ) : null}
               </div>
             </>
-          ) : (
-            null
-          )}
+          ) : route === 'landing' ? (
+            <button className="header-start-free" onClick={() => onAuth('signup', '/')} type="button">
+              Inizia ora gratis
+              <ArrowRight size={16} />
+            </button>
+          ) : null}
         </div>
       </div>
     </header>
@@ -8807,9 +8812,11 @@ function App() {
     }
   }, [authUserId, authUserIsDemo])
 
-  const goAuth = (mode: AuthMode) => {
+  const goAuth = (mode: AuthMode, nextPath?: string) => {
     setAuthMode(mode)
-    navigateRoute(mode === 'signup' ? 'signup' : 'login')
+    navigateRoute(mode === 'signup' ? 'signup' : 'login', {
+      search: nextPath ? `?next=${encodeURIComponent(nextPath)}` : '',
+    })
   }
 
   const exploreSubject = (value: string) => {
@@ -8842,7 +8849,8 @@ function App() {
         const result = await signUpWithEmail(values.email.trim(), values.password, values.fullName.trim())
         if (result.status === 'confirm') {
           setAuthMode('login')
-          navigateRoute('login', { replace: true })
+          const nextPath = new URLSearchParams(window.location.search).get('next')
+          navigateRoute('login', { replace: true, search: nextPath ? `?next=${encodeURIComponent(nextPath)}` : '' })
           notify('Ti abbiamo inviato un’email di conferma: aprila, poi accedi qui.')
           return
         }
@@ -8991,7 +8999,11 @@ function App() {
 
   const switchAuthMode = (mode: AuthMode) => {
     setAuthMode(mode)
-    navigateRoute(mode === 'signup' ? 'signup' : 'login', { replace: true })
+    const nextPath = new URLSearchParams(window.location.search).get('next')
+    navigateRoute(mode === 'signup' ? 'signup' : 'login', {
+      replace: true,
+      search: nextPath ? `?next=${encodeURIComponent(nextPath)}` : '',
+    })
   }
 
   useEffect(() => {
@@ -9007,7 +9019,7 @@ function App() {
   return (
     <>
       {route !== 'login' && route !== 'signup' ? (
-        <Header route={route} isLoggedIn={isLoggedIn} credits={credits} user={authUser} onRoute={navigateRoute} onSearch={searchDocuments} onSignOut={() => void handleSignOut()} />
+        <Header route={route} isLoggedIn={isLoggedIn} credits={credits} user={authUser} onRoute={navigateRoute} onAuth={goAuth} onSearch={searchDocuments} onSignOut={() => void handleSignOut()} />
       ) : null}
       {route === 'landing' ? (
         <LandingPage onRoute={navigateRoute} onAuth={goAuth} onExploreSubject={exploreSubject} onOpenDemo={() => setDemoOpen(true)} onOpenDegree={openDegreePage} />

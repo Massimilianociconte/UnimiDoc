@@ -215,6 +215,29 @@ button {
   display: none;
 }
 
+.header-start-free {
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 18px;
+  color: #fff;
+  background: var(--primary);
+  box-shadow: 0 12px 24px rgba(22, 104, 69, 0.22);
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.header-start-free:hover,
+.header-start-free:focus-visible {
+  background: var(--primary-dark);
+  box-shadow: 0 16px 28px rgba(22, 104, 69, 0.28);
+}
+
 .primary-action,
 .secondary-action,
 .premium-button,
@@ -10480,6 +10503,12 @@ button.dashboard-stat:hover {
   .app-header .icon-button,
   .app-header .user-button {
     padding: 0 10px;
+  }
+
+  .landing-header .header-start-free {
+    min-height: 44px;
+    padding-inline: 14px;
+    font-size: 14px;
   }
 }
 
