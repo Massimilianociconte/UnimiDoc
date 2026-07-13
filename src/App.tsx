@@ -783,9 +783,9 @@ function Header({
   onSearch: (query: string) => void
   onSignOut: () => void
 }) {
-  // Every product page shares the Explore header. The landing page keeps its
-  // search inside the hero so the first impression remains intentionally calm.
-  const appArea = route !== 'landing'
+  // The header layout is shared by every public product page. Only the landing
+  // keeps search inside its hero, so its first viewport stays focused.
+  const showHeaderSearch = route !== 'landing'
   const firstName = user?.name.split(' ')[0] || 'Giulia'
   const initials = user?.name
     .split(' ')
@@ -819,14 +819,14 @@ function Header({
   }
 
   return (
-    <header className={`site-header ${appArea ? 'app-header' : ''}`}>
+    <header className={`site-header app-header ${showHeaderSearch ? '' : 'landing-header'}`}>
       <div className="header-inner">
         <button className="brand-button" onClick={() => onRoute('landing')} type="button">
           <LogoMark />
           <span>UnimiDoc</span>
         </button>
 
-        {appArea ? (
+        {showHeaderSearch ? (
           <HeaderSearch onSearch={onSearch} />
         ) : null}
 
@@ -844,7 +844,7 @@ function Header({
         </nav>
 
         <div className="header-actions">
-          {appArea && isLoggedIn ? (
+          {isLoggedIn ? (
             <button className="credits-chip" onClick={() => onRoute('dashboard', { hash: 'crediti' })} type="button">
               <CreditIcon size="sm" />
               {credits}<span className="credits-chip-label"> crediti</span>
@@ -852,11 +852,9 @@ function Header({
           ) : null}
           {isLoggedIn ? (
             <>
-              {appArea ? (
-                <button className="icon-button" aria-label="Notifiche" onClick={() => onRoute('dashboard', { hash: 'notifiche' })} type="button">
-                  <Bell size={18} />
-                </button>
-              ) : null}
+              <button className="icon-button" aria-label="Notifiche" onClick={() => onRoute('dashboard', { hash: 'notifiche' })} type="button">
+                <Bell size={18} />
+              </button>
               <div className={`user-menu ${menuOpen ? 'open' : ''}`} ref={menuRef}>
                 <button
                   className="user-button"

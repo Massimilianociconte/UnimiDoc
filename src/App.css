@@ -44,6 +44,16 @@ button {
   justify-content: flex-end;
 }
 
+/* Landing uses the same header rail as Esplora, minus the header search. */
+.landing-header .header-inner {
+  grid-template-columns: auto 1fr auto;
+  gap: 24px;
+}
+
+.landing-header .main-nav {
+  justify-content: center;
+}
+
 .brand-button {
   min-height: 44px;
   display: inline-flex;
@@ -8693,6 +8703,16 @@ button.dashboard-stat:hover {
     gap: 12px 14px;
     padding: 12px 0;
     align-items: center;
+  }
+
+  /* On the landing the hero owns search, so the second row is the navigation
+     itself rather than an empty search track. */
+  .landing-header .header-inner {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      'brand actions'
+      'nav nav';
+    gap: 12px 14px;
   }
 
   .app-header .header-inner > .brand-button {
