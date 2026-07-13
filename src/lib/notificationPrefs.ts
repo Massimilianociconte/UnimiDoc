@@ -152,12 +152,13 @@ function readLocal(user: AppAuthUser): NotificationPrefs | null {
   }
 }
 
-function writeLocal(user: AppAuthUser, prefs: NotificationPrefs) {
-  if (typeof window === 'undefined') return
+function writeLocal(user: AppAuthUser, prefs: NotificationPrefs): boolean {
+  if (typeof window === 'undefined') return false
   try {
     window.localStorage.setItem(storageKey(user), JSON.stringify(prefs))
+    return true
   } catch {
-    // ignore quota / privacy-mode errors
+    return false
   }
 }
 
@@ -166,11 +167,12 @@ export async function loadNotificationPrefs(user: AppAuthUser): Promise<Notifica
 
   if (supabase && !user.isDemo) {
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('notification_preferences')
         .select('prefs')
         .eq('owner_id', user.id)
         .maybeSingle()
+      if (error) throw error
       const remote = (data as { prefs: Partial<NotificationPrefs> } | null)?.prefs
       if (remote) {
         const normalized = normalizePrefs(remote)
@@ -185,17 +187,31 @@ export async function loadNotificationPrefs(user: AppAuthUser): Promise<Notifica
   return local ?? defaultNotificationPrefs()
 }
 
-export async function saveNotificationPrefs(user: AppAuthUser, prefs: NotificationPrefs): Promise<void> {
-  writeLocal(user, prefs)
+export type NotificationPrefsSaveResult = {
+  localSaved: boolean
+  remoteSynced: boolean
+  message?: string
+}
+
+export async function saveNotificationPrefs(user: AppAuthUser, prefs: NotificationPrefs): Promise<NotificationPrefsSaveResult> {
+  const localSaved = writeLocal(user, prefs)
 
   if (supabase && !user.isDemo) {
     try {
-      await supabase.from('notification_preferences').upsert(
+      const { error } = await supabase.from('notification_preferences').upsert(
         { owner_id: user.id, prefs, updated_at: new Date().toISOString() },
         { onConflict: 'owner_id' },
       )
-    } catch {
-      // local copy already saved; server sync can retry later
+      if (error) throw error
+      return { localSaved, remoteSynced: true }
+    } catch (error) {
+      return {
+        localSaved,
+        remoteSynced: false,
+        message: error instanceof Error ? error.message : 'Sincronizzazione remota non riuscita',
+      }
     }
   }
+
+  return { localSaved, remoteSynced: user.isDemo }
 }

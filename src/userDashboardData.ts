@@ -10,6 +10,8 @@ export type DashboardNotification = {
   body: string
   time: string
   tone: 'info' | 'success' | 'warning'
+  readAt?: string | null
+  unread?: boolean
 }
 
 export type CreditHistoryEntry = {
@@ -91,6 +93,30 @@ export type UserDashboardData = {
   suggestions: StudySuggestion[]
 }
 
+export type DashboardProcessingDocument = {
+  id: string
+  title: string
+  subject: string
+  visibility: string
+  analysisStatus: string
+  analysisProgress: number
+  analysisStage: string | null
+  analysisErrorCode: string | null
+  compressionStatus: string
+  ragStatus: string
+  ragChunkCount: number
+  flashcardStatus: string
+  updatedAt: string
+}
+
+export type DashboardSellerSummary = {
+  enabled: boolean
+  publishedDocuments: number
+  activeSales: number
+  creditsEarned: number
+  cashBackingMinor: number
+}
+
 // Real, persisted slices of the dashboard that the backend already populates for
 // every authenticated user (credits, ledger, notifications). Missing rows are
 // represented as empty states, never replaced with another student's demo data.
@@ -101,7 +127,16 @@ export type DashboardLiveOverlay = {
   notifications: DashboardNotification[]
   purchasedDocumentIds: string[]
   savedDocumentIds: string[]
+  wishlistDocumentIds: string[]
   laterDocumentIds: string[]
+  libraryDocuments: DocumentItem[]
+  subjectProgress: SubjectProgress[]
+  documentProgress: DocumentProgress[]
+  sessions: StudySessionSummary[]
+  reviews: ReviewTask[]
+  processingDocuments: DashboardProcessingDocument[]
+  seller: DashboardSellerSummary
+  syncedAt: string
 }
 
 function relativeTimeLabel(iso: string): string {
@@ -120,8 +155,26 @@ function relativeTimeLabel(iso: string): string {
   return weeks <= 1 ? '1 settimana fa' : `${weeks} settimane fa`
 }
 
-type CreditTxRow = { id: string; direction: string; amount: number; reason: string; created_at: string }
-type NotificationRow = { id: string; title: string; body: string; notification_type: string; created_at: string }
+type CreditTxRow = {
+  id: string
+  direction: string
+  amount: number
+  reason: string
+  created_at: string
+  balance_after: number | null
+  free_delta: number | null
+  promotional_delta: number | null
+  purchased_delta: number | null
+  earned_delta: number | null
+}
+type NotificationRow = {
+  id: string
+  title: string
+  body: string
+  notification_type: string
+  created_at: string
+  read_at: string | null
+}
 type CreditAccountRow = {
   balance: number
   free_credits: number
@@ -135,69 +188,178 @@ type PurchaseRow = {
   document_id: string
   credits_spent: number
   created_at: string
-  documents: {
-    title: string
-    course_name: string
-    professor: string | null
-    academic_year: string | null
-    page_count: number | null
-  } | null
+  status?: string
+  title: string
+  course_name: string
+  professor: string | null
+  academic_year: string | null
+  page_count: number | null
+  degree_course: string | null
+  degree_slug: string | null
+  university: string | null
+  author_id: string | null
 }
 
-/**
- * Loads the user's real credits, ledger and notifications from Supabase.
- * Returns null for demo users, when Supabase is not configured, or when all
- * three reads fail. An empty successful response remains authoritative.
- */
+type LibraryRow = Omit<PurchaseRow, 'id' | 'credits_spent' | 'created_at'> & {
+  id: string
+  document_id: string
+  relation: string
+  created_at: string
+  updated_at: string
+}
+
+type DashboardSnapshot = {
+  account: CreditAccountRow
+  transactions: CreditTxRow[]
+  notifications: NotificationRow[]
+  purchases: PurchaseRow[]
+  library: LibraryRow[]
+  study_sessions: Array<{
+    id: string
+    document_id: string | null
+    subject: string | null
+    session_type: string
+    duration_seconds: number
+    cards_reviewed: number
+    quiz_questions: number
+    correct_answers: number
+    started_at: string
+    finished_at: string | null
+    document_title: string | null
+  }>
+  document_progress: Array<{
+    id: string
+    document_id: string
+    progress_percent: number | string
+    last_page: number | null
+    flashcards_total: number
+    flashcards_mastered: number
+    quiz_accuracy: number | string | null
+    last_studied_at: string | null
+    updated_at: string
+    title: string
+    course_name: string
+  }>
+  subject_progress: Array<{
+    id: string
+    subject: string
+    progress_percent: number | string
+    documents_count: number
+    due_reviews: number
+    average_accuracy: number | string | null
+    updated_at: string
+  }>
+  review_tasks: Array<{
+    id: string
+    subject: string | null
+    title: string
+    due_at: string
+    priority: 'low' | 'medium' | 'high'
+  }>
+  owned_documents: Array<{
+    id: string
+    title: string
+    course_name: string
+    visibility: string
+    compression_status: string
+    flashcard_status: string
+    rag_status: string
+    rag_chunk_count: number
+    analysis_status: string
+    analysis_progress: number
+    analysis_stage: string | null
+    analysis_error_code: string | null
+    updated_at: string
+  }>
+  seller: {
+    enabled: boolean
+    published_documents: number
+    active_sales: number
+    credits_earned: number
+    cash_backing_minor: number
+  }
+}
+
+function mapDashboardDocument(row: PurchaseRow | LibraryRow): DocumentItem {
+  return {
+    id: row.document_id,
+    title: row.title || 'Documento universitario',
+    subject: row.course_name || 'Materia non indicata',
+    professor: row.professor || 'Docente non indicato',
+    academicYear: row.academic_year || 'Anno non indicato',
+    type: 'Materiale universitario',
+    examType: 'Non indicato',
+    pages: row.page_count ?? 0,
+    sizeMb: 0,
+    quality: 0,
+    credits: 0,
+    downloads: 0,
+    description: 'Materiale presente nella tua libreria personale.',
+    status: 'approved',
+    verified: true,
+    premium: true,
+    uploader: 'Autore UnimiDoc',
+    sellerId: row.author_id ?? undefined,
+    sellerPublic: true,
+    uploaderTrust: 0,
+    fileHash: '',
+    malwareScan: 'pulito',
+    copyrightRisk: 'basso',
+    reportCount: 0,
+    uploadedAt: row.created_at,
+    language: 'Italiano',
+    previewKind: 'notes',
+    degreeCourse: row.degree_course ?? undefined,
+    degreeSlug: row.degree_slug ?? undefined,
+    university: row.university ?? 'Università degli Studi di Milano',
+  }
+}
+
+function formatDuration(seconds: number): string {
+  const minutes = Math.max(0, Math.round(seconds / 60))
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  const remainder = minutes % 60
+  return remainder ? `${hours} h ${remainder} min` : `${hours} h`
+}
+
+function signedTransactionDelta(row: CreditTxRow): number {
+  const explicit = (row.free_delta ?? 0) + (row.promotional_delta ?? 0) + (row.purchased_delta ?? 0) + (row.earned_delta ?? 0)
+  if (explicit !== 0) return explicit
+  return row.direction === 'spent' || row.direction === 'reserved' ? -row.amount : row.amount
+}
+
+/** Loads the owner-scoped dashboard read model in one consistent request. */
 export async function loadDashboardLiveOverlay(user: AppAuthUser): Promise<DashboardLiveOverlay | null> {
   if (!supabase || user.isDemo) return null
 
-  try {
-    const [account, tx, notifs, purchases, library] = await Promise.all([
-      supabase
-        .from('user_credit_accounts')
-        .select('balance, free_credits, promotional_credits, purchased_credits, earned_credits, earned_convertible')
-        .eq('owner_id', user.id)
-        .maybeSingle(),
-      supabase
-        .from('credit_transactions')
-        .select('id, direction, amount, reason, created_at')
-        .eq('owner_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(12),
-      supabase
-        .from('user_notifications')
-        .select('id, title, body, notification_type, created_at')
-        .eq('owner_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(8),
-      supabase
-        .from('document_purchases')
-        .select('id, document_id, credits_spent, created_at, documents(title, course_name, professor, academic_year, page_count)')
-        .eq('buyer_id', user.id)
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('user_library_items')
-        .select('document_id, relation')
-        .eq('owner_id', user.id),
-    ])
+  const { data, error } = await supabase.rpc('get_user_dashboard_snapshot')
+  if (error) throw new Error(error.message || 'dashboard_snapshot_failed')
 
-    // Balance is the primary invariant for this overlay. A partial response
-    // must never turn a failed account read into an authoritative zero.
-    if (account.error) return null
+  const snapshot = data as unknown as DashboardSnapshot | null
+  if (!snapshot?.account) throw new Error('dashboard_snapshot_incomplete')
 
-    const accountRow = account.data as CreditAccountRow | null
-    const credits = accountRow?.balance ?? 0
+  const accountRow = snapshot.account
+  const credits = accountRow.balance ?? 0
+  const txRows = snapshot.transactions ?? []
+  const libraryRows = snapshot.library ?? []
+  const purchaseRows = snapshot.purchases ?? []
 
-    const creditHistory: CreditHistoryEntry[] = ((tx.data as CreditTxRow[] | null) ?? []).map((row) => ({
-      id: row.id,
-      type: row.direction === 'spent' ? 'spent' : row.direction === 'reserved' ? 'reserved' : 'earned',
-      amount: row.amount,
-      reason: row.reason,
-      date: relativeTimeLabel(row.created_at),
-    }))
+  const creditHistory: CreditHistoryEntry[] = txRows.map((row) => ({
+    id: row.id,
+    type: row.direction === 'spent' ? 'spent' : row.direction === 'reserved' ? 'reserved' : 'earned',
+    amount: row.amount,
+    reason: row.reason,
+    date: relativeTimeLabel(row.created_at),
+  }))
 
-    const ledger: LedgerEntry[] = ((tx.data as CreditTxRow[] | null) ?? []).map((row) => ({
+  let inferredBalance = credits
+  const ledger: LedgerEntry[] = txRows.map((row) => {
+    const delta = signedTransactionDelta(row)
+    const balanceAfter = row.balance_after ?? inferredBalance
+    const balanceBefore = balanceAfter - delta
+    inferredBalance = balanceBefore
+    return {
       id: row.id,
       ts: new Date(row.created_at).getTime(),
       direction:
@@ -209,75 +371,149 @@ export async function loadDashboardLiveOverlay(user: AppAuthUser): Promise<Dashb
               ? 'welcome'
               : 'earned',
       amount: row.amount,
-      balanceBefore: 0,
-      balanceAfter: 0,
+      balanceBefore,
+      balanceAfter,
       reason: row.reason,
       eurValue: row.direction === 'purchased' || row.direction === 'spent' ? creditsToEur(row.amount) : 0,
-    }))
+    }
+  })
 
-    const notifications: DashboardNotification[] = ((notifs.data as NotificationRow[] | null) ?? []).map((row) => ({
+  const notifications: DashboardNotification[] = (snapshot.notifications ?? []).map((row) => ({
+    id: row.id,
+    title: row.title,
+    body: row.body,
+    time: relativeTimeLabel(row.created_at),
+    readAt: row.read_at,
+    unread: !row.read_at,
+    tone:
+      row.notification_type === 'warning'
+        ? 'warning'
+        : row.notification_type === 'success' || row.notification_type === 'purchase' || row.notification_type === 'credits'
+          ? 'success'
+          : 'info',
+  }))
+
+  const purchasedDocumentIds = [...new Set([
+    ...purchaseRows.map((row) => row.document_id),
+    ...libraryRows.filter((row) => row.relation === 'purchased').map((row) => row.document_id),
+  ])]
+  const savedDocumentIds = libraryRows
+    .filter((row) => row.relation === 'saved')
+    .map((row) => row.document_id)
+  const wishlistDocumentIds = libraryRows
+    .filter((row) => row.relation === 'wishlist')
+    .map((row) => row.document_id)
+  const laterDocumentIds = libraryRows
+    .filter((row) => row.relation === 'study_later')
+    .map((row) => row.document_id)
+  const libraryDocuments = uniqueById([...purchaseRows.map(mapDashboardDocument), ...libraryRows.map(mapDashboardDocument)])
+
+  const purchasedItems: PurchasedItem[] = purchaseRows.map((row) => ({
+    transactionId: row.id,
+    documentId: row.document_id,
+    title: row.title ?? 'Documento acquistato',
+    subject: row.course_name ?? 'Materia non disponibile',
+    type: 'Materiale universitario',
+    university: row.university ?? 'Università degli Studi di Milano',
+    course: row.degree_course ?? 'Corso di laurea non indicato',
+    professor: row.professor ?? 'Docente non indicato',
+    academicYear: row.academic_year ?? 'Anno non indicato',
+    uploader: 'Autore UnimiDoc',
+    purchasedAt: new Date(row.created_at).getTime(),
+    creditsSpent: row.credits_spent,
+    balanceBefore: 0,
+    balanceAfter: 0,
+    eurValue: creditsToEur(row.credits_spent),
+    pages: row.page_count ?? 0,
+  }))
+
+  const walletState: WalletState = {
+    wallet: {
+      free: accountRow.free_credits ?? 0,
+      promotional: accountRow.promotional_credits ?? 0,
+      purchased: accountRow.purchased_credits ?? 0,
+      earned: accountRow.earned_credits ?? 0,
+      earnedConvertible: accountRow.earned_convertible ?? 0,
+    },
+    ledger,
+    purchases: purchasedItems,
+    initialized: true,
+  }
+
+  return {
+    credits,
+    walletState,
+    creditHistory,
+    notifications,
+    purchasedDocumentIds,
+    savedDocumentIds,
+    wishlistDocumentIds,
+    laterDocumentIds,
+    libraryDocuments,
+    subjectProgress: (snapshot.subject_progress ?? []).map((row) => ({
+      subject: row.subject,
+      progress: Math.round(Number(row.progress_percent) || 0),
+      documents: row.documents_count,
+      accuracy: Math.round(Number(row.average_accuracy) || 0),
+      due: row.due_reviews,
+    })),
+    documentProgress: (snapshot.document_progress ?? []).map((row) => ({
+      id: row.document_id,
+      title: row.title,
+      subject: row.course_name,
+      progress: Math.round(Number(row.progress_percent) || 0),
+      flashcards: row.flashcards_total,
+      quizAccuracy: Math.round(Number(row.quiz_accuracy) || 0),
+      lastSession: row.last_studied_at ? relativeTimeLabel(row.last_studied_at) : 'Mai',
+    })),
+    sessions: (snapshot.study_sessions ?? []).map((row) => ({
+      id: row.id,
+      title: row.document_title || `${row.session_type === 'flashcards' ? 'Ripasso flashcard' : 'Sessione di studio'}${row.subject ? ` · ${row.subject}` : ''}`,
+      detail: row.cards_reviewed
+        ? `${row.cards_reviewed} card · ${row.correct_answers} corrette`
+        : row.quiz_questions
+          ? `${row.quiz_questions} domande · ${row.correct_answers} corrette`
+          : row.subject || 'Attività registrata',
+      duration: formatDuration(row.duration_seconds),
+      date: relativeTimeLabel(row.finished_at ?? row.started_at),
+    })),
+    reviews: (snapshot.review_tasks ?? []).map((row) => ({
       id: row.id,
       title: row.title,
-      body: row.body,
-      time: relativeTimeLabel(row.created_at),
-      tone:
-        row.notification_type === 'warning'
-          ? 'warning'
-          : row.notification_type === 'success' || row.notification_type === 'purchase' || row.notification_type === 'credits'
-            ? 'success'
-            : 'info',
-    }))
-
-    const purchaseRows = ((purchases.data ?? []) as unknown as PurchaseRow[])
-    const purchasedDocumentIds = [...new Set([
-      ...purchaseRows.map((row) => row.document_id),
-      ...((library.data ?? []) as Array<{ document_id: string; relation: string }>)
-        .filter((row) => row.relation === 'purchased')
-        .map((row) => row.document_id),
-    ])]
-    const savedDocumentIds = ((library.data ?? []) as Array<{ document_id: string; relation: string }>)
-      .filter((row) => row.relation === 'saved' || row.relation === 'wishlist')
-      .map((row) => row.document_id)
-    const laterDocumentIds = ((library.data ?? []) as Array<{ document_id: string; relation: string }>)
-      .filter((row) => row.relation === 'study_later')
-      .map((row) => row.document_id)
-
-    const purchasedItems: PurchasedItem[] = purchaseRows.map((row) => ({
-      transactionId: row.id,
-      documentId: row.document_id,
-      title: row.documents?.title ?? 'Documento acquistato',
-      subject: row.documents?.course_name ?? 'Materia non disponibile',
-      type: 'Materiale universitario',
-      university: 'Università degli Studi di Milano',
-      course: 'Scienze Biologiche L-13',
-      professor: row.documents?.professor ?? 'Docente non indicato',
-      academicYear: row.documents?.academic_year ?? 'Anno non indicato',
-      uploader: 'Autore UnimiDoc',
-      purchasedAt: new Date(row.created_at).getTime(),
-      creditsSpent: row.credits_spent,
-      balanceBefore: 0,
-      balanceAfter: 0,
-      eurValue: creditsToEur(row.credits_spent),
-      pages: row.documents?.page_count ?? 0,
-    }))
-
-    const walletState: WalletState = {
-      wallet: {
-        free: accountRow?.free_credits ?? 0,
-        promotional: accountRow?.promotional_credits ?? 0,
-        purchased: accountRow?.purchased_credits ?? 0,
-        earned: accountRow?.earned_credits ?? 0,
-        earnedConvertible: accountRow?.earned_convertible ?? 0,
-      },
-      ledger,
-      purchases: purchasedItems,
-      initialized: true,
-    }
-
-    return { credits, walletState, creditHistory, notifications, purchasedDocumentIds, savedDocumentIds, laterDocumentIds }
-  } catch {
-    return null
+      subject: row.subject || 'Ripasso',
+      dueAt: relativeTimeLabel(row.due_at),
+      priority: row.priority === 'high' ? 'alta' : row.priority === 'low' ? 'bassa' : 'media',
+    })),
+    processingDocuments: (snapshot.owned_documents ?? []).map((row) => ({
+      id: row.id,
+      title: row.title,
+      subject: row.course_name,
+      visibility: row.visibility,
+      analysisStatus: row.analysis_status,
+      analysisProgress: row.analysis_progress,
+      analysisStage: row.analysis_stage,
+      analysisErrorCode: row.analysis_error_code,
+      compressionStatus: row.compression_status,
+      ragStatus: row.rag_status,
+      ragChunkCount: row.rag_chunk_count,
+      flashcardStatus: row.flashcard_status,
+      updatedAt: row.updated_at,
+    })),
+    seller: {
+      enabled: snapshot.seller?.enabled ?? false,
+      publishedDocuments: snapshot.seller?.published_documents ?? 0,
+      activeSales: snapshot.seller?.active_sales ?? 0,
+      creditsEarned: snapshot.seller?.credits_earned ?? 0,
+      cashBackingMinor: snapshot.seller?.cash_backing_minor ?? 0,
+    },
+    syncedAt: new Date().toISOString(),
   }
+}
+
+export async function markDashboardNotificationRead(notificationId: string): Promise<void> {
+  if (!supabase) return
+  const { error } = await supabase.rpc('mark_notification_read', { p_notification: notificationId })
+  if (error) throw new Error(error.message || 'notification_update_failed')
 }
 
 function compactTitle(document: DocumentItem) {
@@ -341,6 +577,13 @@ export function buildUserDashboardData({
           label: 'Dispensa personale',
           description: 'Documenti salvati per lo studio.',
           emptyText: 'Salva un documento per costruire la tua dispensa.',
+          documents: [],
+        },
+        {
+          id: 'wishlist',
+          label: 'Wishlist',
+          description: 'Materiali salvati prima dell’acquisto.',
+          emptyText: 'Aggiungi un materiale alla wishlist per ritrovarlo qui su ogni dispositivo.',
           documents: [],
         },
         {
@@ -451,6 +694,13 @@ export function buildUserDashboardData({
         description: 'Materiali segnati come utili, ma non urgenti.',
         emptyText: 'Nessun documento in lista d’attesa.',
         documents: uniqueById([...wishlist, ...studyLater]).slice(0, 6),
+      },
+      {
+        id: 'wishlist',
+        label: 'Wishlist',
+        description: 'Materiali che vuoi valutare o acquistare più avanti.',
+        emptyText: 'La tua wishlist è vuota.',
+        documents: wishlist,
       },
     ],
     decks: saved.slice(0, 5).map((document, index) => ({

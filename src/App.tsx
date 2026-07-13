@@ -133,7 +133,12 @@ import {
   type AiHelpMode,
   type PremiumGeneratedFlashcard,
 } from './lib/aiClient'
-import { buildUserDashboardData, loadDashboardLiveOverlay, type DashboardLiveOverlay } from './userDashboardData'
+import {
+  buildUserDashboardData,
+  loadDashboardLiveOverlay,
+  markDashboardNotificationRead,
+  type DashboardLiveOverlay,
+} from './userDashboardData'
 import {
   EMPTY_FLASHCARD_FILTERS,
   flashcardProgressId,
@@ -6646,7 +6651,7 @@ function UploadPage({
   )
 }
 
-type DashboardView = 'overview' | 'library' | 'study' | 'progress' | 'credits'
+type DashboardView = 'overview' | 'library' | 'documents' | 'study' | 'progress' | 'credits' | 'creator'
 
 const DASHBOARD_VIEWS: Array<{
   key: DashboardView
@@ -6656,9 +6661,11 @@ const DASHBOARD_VIEWS: Array<{
 }> = [
   { key: 'overview', label: 'Panoramica', hint: 'Stato generale e novità', icon: LayoutDashboard },
   { key: 'library', label: 'Libreria', hint: 'Documenti e acquisti', icon: Library },
+  { key: 'documents', label: 'Documenti', hint: 'Upload ed elaborazioni', icon: FileText },
   { key: 'study', label: 'Studio', hint: 'Flashcard, errori e deck', icon: BrainCircuit },
   { key: 'progress', label: 'Progressi', hint: 'Andamento e sessioni', icon: TrendingUp },
   { key: 'credits', label: 'Crediti', hint: 'Saldo e movimenti', icon: Wallet },
+  { key: 'creator', label: 'Autore', hint: 'Vendite e qualità', icon: Trophy },
 ]
 
 // Deep-link hash → dashboard view. Keeps old #crediti / #flashcard links alive.
@@ -6667,10 +6674,28 @@ const DASHBOARD_HASH_VIEWS: Record<string, DashboardView> = {
   panoramica: 'overview',
   notifiche: 'overview',
   libreria: 'library',
+  wishlist: 'library',
+  documenti: 'documents',
+  upload: 'documents',
+  elaborazioni: 'documents',
   flashcard: 'study',
   studio: 'study',
   progressi: 'progress',
   crediti: 'credits',
+  autore: 'creator',
+  vendite: 'creator',
+}
+
+function relativeDashboardTime(iso: string): string {
+  const timestamp = new Date(iso).getTime()
+  if (!Number.isFinite(timestamp)) return 'di recente'
+  const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60000))
+  if (minutes < 1) return 'adesso'
+  if (minutes < 60) return `${minutes} min fa`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} h fa`
+  const days = Math.round(hours / 24)
+  return days === 1 ? 'ieri' : `${days} giorni fa`
 }
 
 function UserDashboardPage({
@@ -6683,6 +6708,7 @@ function UserDashboardPage({
   onRoute,
   onSignOut,
   uploads,
+  entryRoute,
 }: {
   user: AppAuthUser
   documents: DocumentItem[]
@@ -6693,15 +6719,19 @@ function UserDashboardPage({
   onRoute: (route: Route, options?: { hash?: string }) => void
   onSignOut: () => void
   uploads: DocumentItem[]
+  entryRoute: 'dashboard' | 'library'
 }) {
   const baseData = useMemo(() => buildUserDashboardData({ user, credits, documents, uploads }), [credits, documents, uploads, user])
   const [overlay, setOverlay] = useState<DashboardLiveOverlay | null>(null)
   const [liveLoading, setLiveLoading] = useState(false)
+  const [liveError, setLiveError] = useState('')
+  const [flashcardError, setFlashcardError] = useState('')
   const [activeShelfId, setActiveShelfId] = useState<string | null>(null)
-  const [activeView, setActiveView] = useState<DashboardView>('overview')
+  const [activeView, setActiveView] = useState<DashboardView>(() => entryRoute === 'library' ? 'library' : 'overview')
   const [sidePanel, setSidePanel] = useState<'notifications' | 'credits' | null>(null)
   const [flashcardDashboard, setFlashcardDashboard] = useState<FlashcardDashboardData | null>(null)
   const [flashcardFilters, setFlashcardFilters] = useState<FlashcardDashboardFilters>(EMPTY_FLASHCARD_FILTERS)
+  const [flashcardVisible, setFlashcardVisible] = useState(12)
   const [dashboardStudyDeck, setDashboardStudyDeck] = useState<{
     title: string
     documentId: string | null
@@ -6713,7 +6743,7 @@ function UserDashboardPage({
   const [reviewLoading, setReviewLoading] = useState<string | null>(null)
   const [reviewMeta, setReviewMeta] = useState<{ scope: ReviewScope; semanticCount: number; total: number } | null>(null)
 
-  // Deep-link to a dashboard view via #hash (from navbar / user menu).
+  // Deep-link to a dashboard view via route/hash (from navbar / user menu).
   useEffect(() => {
     const applySection = (id: string | undefined) => {
       if (!id) return
@@ -6721,36 +6751,46 @@ function UserDashboardPage({
       if (!view) return
       setActiveView(view)
       if (id === 'notifiche') setSidePanel('notifications')
+      if (id === 'wishlist') setActiveShelfId('wishlist')
       window.requestAnimationFrame(() => {
         document.querySelector('.dashboard-nav')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       })
     }
-    applySection(window.location.hash.replace('#', '') || undefined)
+    const hashView = window.location.hash.replace('#', '') || undefined
+    if (hashView) applySection(hashView)
+    else if (entryRoute === 'library') setActiveView('library')
+    else {
+      const persisted = window.sessionStorage.getItem(`unimidoc:dashboard-view:${user.id}`) as DashboardView | null
+      if (persisted && DASHBOARD_VIEWS.some((view) => view.key === persisted)) setActiveView(persisted)
+    }
     const onSection = (event: Event) => applySection((event as CustomEvent<string>).detail)
     window.addEventListener('ud-section', onSection)
     return () => window.removeEventListener('ud-section', onSection)
-  }, [])
+  }, [entryRoute, user.id])
 
   const selectView = (view: DashboardView) => {
     setActiveView(view)
+    window.sessionStorage.setItem(`unimidoc:dashboard-view:${user.id}`, view)
     const hash = Object.entries(DASHBOARD_HASH_VIEWS).find(([, candidate]) => candidate === view)?.[0]
     if (hash) window.history.replaceState(null, '', `#${hash}`)
   }
 
-  useEffect(() => {
+  const refreshDashboard = useCallback(() => {
     if (user.isDemo || !isSupabaseConfigured) {
       setOverlay(null)
-      return
+      setLiveError('')
+      return () => undefined
     }
 
     let active = true
     setLiveLoading(true)
+    setLiveError('')
     loadDashboardLiveOverlay(user)
       .then((result) => {
         if (active) setOverlay(result)
       })
       .catch(() => {
-        if (active) setOverlay(null)
+        if (active) setLiveError('Non siamo riusciti ad aggiornare i dati personali. I dati già caricati restano disponibili.')
       })
       .finally(() => {
         if (active) setLiveLoading(false)
@@ -6761,14 +6801,17 @@ function UserDashboardPage({
     }
   }, [user])
 
+  useEffect(() => refreshDashboard(), [refreshDashboard])
+
   useEffect(() => {
     let active = true
+    setFlashcardError('')
     loadFlashcardDashboardData(user, documents)
       .then((result) => {
         if (active) setFlashcardDashboard(result)
       })
       .catch(() => {
-        if (active) setFlashcardDashboard(null)
+        if (active) setFlashcardError('Archivio flashcard temporaneamente non disponibile.')
       })
     return () => {
       active = false
@@ -6777,32 +6820,48 @@ function UserDashboardPage({
 
   // Empty live arrays are authoritative empty states. Falling back to fixtures
   // for a real account would fabricate purchases, notifications and progress.
+  const dashboardDocuments = overlay
+    ? [...documents, ...overlay.libraryDocuments].filter((document, index, all) => all.findIndex((item) => item.id === document.id) === index)
+    : documents
   const data = overlay
     ? {
         ...baseData,
         creditHistory: overlay.creditHistory,
         notifications: overlay.notifications,
+        subjectProgress: overlay.subjectProgress,
+        documentProgress: overlay.documentProgress,
+        sessions: overlay.sessions,
+        reviews: overlay.reviews,
         shelves: baseData.shelves.map((shelf) => {
           const ids = shelf.id === 'purchased'
             ? overlay.purchasedDocumentIds
             : shelf.id === 'saved'
               ? overlay.savedDocumentIds
+              : shelf.id === 'wishlist'
+                ? overlay.wishlistDocumentIds
               : shelf.id === 'later'
                 ? overlay.laterDocumentIds
                 : null
           return ids
-            ? { ...shelf, documents: ids.map((id) => documents.find((document) => document.id === id)).filter((document): document is DocumentItem => Boolean(document)) }
+            ? { ...shelf, documents: ids.map((id) => dashboardDocuments.find((document) => document.id === id)).filter((document): document is DocumentItem => Boolean(document)) }
             : shelf
         }),
       }
     : baseData
   const displayCredits = overlay?.credits ?? credits
-  const displayedWallet = wallet ?? overlay?.walletState ?? null
+  const displayedWallet = overlay?.walletState ?? wallet ?? null
   const dataIsLive = Boolean(overlay)
   const flashcardDataIsLive = flashcardDashboard?.source === 'live'
   const firstName = user.name.split(' ')[0] || 'Studente'
   const flashcardRecords = useMemo(() => flashcardDashboard?.records ?? [], [flashcardDashboard])
   const filteredFlashcardRecords = filterFlashcardRecords(flashcardRecords, flashcardFilters)
+  const updateFlashcardFilter = <Key extends keyof FlashcardDashboardFilters>(
+    key: Key,
+    value: FlashcardDashboardFilters[Key],
+  ) => {
+    setFlashcardFilters((current) => ({ ...current, [key]: value }))
+    setFlashcardVisible(12)
+  }
   const totalFlashcards = flashcardRecords.length || data.decks.reduce((total, deck) => total + deck.cards, 0)
   const flashcardStats = flashcardRecords.reduce(
     (acc, record) => {
@@ -6831,10 +6890,37 @@ function UserDashboardPage({
     ?? (didacticQualityRows.length
       ? Math.round(didacticQualityRows.reduce((sum, item) => sum + (item.qualityPercent ?? 0), 0) / didacticQualityRows.length)
       : null)
+  const unreadNotifications = data.notifications.filter((notification) => notification.unread).length
+  const processingDocuments = overlay?.processingDocuments ?? []
+  const primaryProgress = data.documentProgress[0] ?? null
+  const primaryReview = data.reviews[0] ?? null
+  const primaryProgressDocument = primaryProgress
+    ? dashboardDocuments.find((document) => document.id === primaryProgress.id) ?? null
+    : null
+  const latestPurchasedDocument = data.shelves.find((shelf) => shelf.id === 'purchased')?.documents[0] ?? null
+  const sellerSummary = overlay?.seller ?? null
 
   const activeShelf = data.shelves.find((shelf) => shelf.id === activeShelfId)
     ?? data.shelves.find((shelf) => shelf.documents.length > 0)
     ?? data.shelves[0]
+
+  const markNotificationRead = async (notificationId: string) => {
+    const notification = data.notifications.find((item) => item.id === notificationId)
+    if (!notification?.unread || !overlay) return
+    try {
+      await markDashboardNotificationRead(notificationId)
+      setOverlay((current) => current
+        ? {
+            ...current,
+            notifications: current.notifications.map((item) => item.id === notificationId
+              ? { ...item, unread: false, readAt: new Date().toISOString() }
+              : item),
+          }
+        : current)
+    } catch {
+      setLiveError('La notifica resta non letta: riprova quando la connessione è stabile.')
+    }
+  }
 
   const openDashboardStudyDeck = (record: FlashcardStudyRecord) => {
     const related = flashcardRecords.filter((candidate) =>
@@ -6915,14 +7001,75 @@ function UserDashboardPage({
               </span>
               {view.key === 'study' && flashcardStats.needsReview > 0 ? (
                 <em className="dashboard-nav-badge">{flashcardStats.needsReview}</em>
+              ) : view.key === 'documents' && processingDocuments.some((document) => ['queued', 'processing'].includes(document.analysisStatus)) ? (
+                <em className="dashboard-nav-badge processing">{processingDocuments.filter((document) => ['queued', 'processing'].includes(document.analysisStatus)).length}</em>
+              ) : view.key === 'overview' && unreadNotifications > 0 ? (
+                <em className="dashboard-nav-badge">{unreadNotifications}</em>
               ) : null}
             </button>
           )
         })}
       </nav>
 
+      {liveLoading && !overlay ? (
+        <section className="dashboard-state-banner loading" role="status">
+          <Loader2 className="spin" size={18} />
+          <div><strong>Sincronizzo la tua area personale</strong><span>Crediti, libreria e progressi arrivano in modo progressivo.</span></div>
+        </section>
+      ) : null}
+      {liveError ? (
+        <section className="dashboard-state-banner error" role="alert">
+          <AlertTriangle size={18} />
+          <div><strong>Aggiornamento parziale</strong><span>{liveError}</span></div>
+          <button onClick={() => refreshDashboard()} type="button"><RefreshCw size={15} /> Riprova</button>
+        </section>
+      ) : null}
+      {flashcardError ? (
+        <section className="dashboard-state-banner warning" role="status">
+          <BrainCircuit size={18} />
+          <div><strong>Modulo studio isolato</strong><span>{flashcardError} Le altre sezioni continuano a funzionare.</span></div>
+        </section>
+      ) : null}
+
       {activeView === 'overview' ? (
       <div className="dashboard-view view-overview">
+      <section className="dashboard-focus-grid" aria-label="Azioni consigliate">
+        <article className="dashboard-focus-card continue">
+          <span className="dashboard-focus-icon"><BookOpen size={20} /></span>
+          <div>
+            <small>Continua da dove eri rimasto</small>
+            <h2>{primaryProgress?.title ?? latestPurchasedDocument?.title ?? 'Apri il tuo prossimo materiale'}</h2>
+            <p>{primaryProgress
+              ? `${primaryProgress.subject} · completato al ${primaryProgress.progress}%`
+              : latestPurchasedDocument
+                ? `${latestPurchasedDocument.subject} · disponibile nella libreria`
+                : 'La cronologia di studio comparirà qui dopo la prima lettura.'}</p>
+          </div>
+          <button
+            onClick={() => {
+              const document = primaryProgressDocument ?? latestPurchasedDocument
+              if (document) onOpenDocument(document)
+              else selectView('library')
+            }}
+            type="button"
+          >
+            <PlayCircle size={16} /> {primaryProgressDocument || latestPurchasedDocument ? 'Riprendi' : 'Apri libreria'}
+          </button>
+        </article>
+        <article className="dashboard-focus-card review">
+          <span className="dashboard-focus-icon"><BrainCircuit size={20} /></span>
+          <div>
+            <small>Ripasso intelligente</small>
+            <h2>{primaryReview?.title ?? 'Nessun errore urgente'}</h2>
+            <p>{primaryReview
+              ? `${primaryReview.subject} · ${primaryReview.dueAt} · priorità ${primaryReview.priority}`
+              : 'Il prossimo ripasso SRS verrà pianificato dopo la tua prima sessione.'}</p>
+          </div>
+          <button onClick={() => selectView('study')} type="button">
+            <RefreshCw size={16} /> {primaryReview ? 'Ripassa ora' : 'Vai allo studio'}
+          </button>
+        </article>
+      </section>
       <section className="dashboard-profile-grid" id="profilo" style={{ scrollMarginTop: '90px' }}>
         <article className="dashboard-profile-card">
           <span className="dashboard-profile-avatar">
@@ -6990,12 +7137,17 @@ function UserDashboardPage({
           </h2>
           <div className="dashboard-notification-list">
             {data.notifications.slice(0, 3).map((notification) => (
-              <article className={notification.tone} key={notification.id}>
+              <article className={`${notification.tone} ${notification.unread ? 'unread' : ''}`} key={notification.id}>
                 <span><Bell size={16} /></span>
                 <div>
                   <strong>{notification.title}</strong>
                   <p>{notification.body}</p>
                   <small>{notification.time}</small>
+                  {notification.unread ? (
+                    <button className="dashboard-notification-read" onClick={() => void markNotificationRead(notification.id)} type="button">
+                      Segna come letta
+                    </button>
+                  ) : null}
                 </div>
               </article>
             ))}
@@ -7042,6 +7194,85 @@ function UserDashboardPage({
           </div>
         </section>
       </div>
+      </div>
+      ) : null}
+
+      {activeView === 'documents' ? (
+      <div className="dashboard-view view-documents">
+        <section className="dashboard-section dashboard-processing-section" id="elaborazioni">
+          <div className="dashboard-section-head">
+            <div>
+              <h2>Documenti ed elaborazioni</h2>
+              <p>Segui upload, compressione, OCR, indice RAG e flashcard senza perdere lo stato al cambio pagina.</p>
+            </div>
+            <button onClick={() => onRoute('upload')} type="button"><Upload size={15} /> Carica documento</button>
+          </div>
+          {processingDocuments.length ? (
+            <div className="dashboard-processing-list">
+              {processingDocuments.map((document) => {
+                const isFailed = document.analysisStatus === 'failed' || document.analysisErrorCode
+                const isReady = document.analysisStatus === 'ready'
+                return (
+                  <article className={isFailed ? 'failed' : isReady ? 'ready' : 'working'} key={document.id}>
+                    <div className="dashboard-processing-title">
+                      <span><FileText size={18} /></span>
+                      <div>
+                        <strong>{document.title}</strong>
+                        <small>{document.subject} · aggiornato {relativeDashboardTime(document.updatedAt)}</small>
+                      </div>
+                      <em>{isFailed ? 'Richiede attenzione' : isReady ? 'Pronto' : document.analysisStatus === 'queued' ? 'In coda' : 'In elaborazione'}</em>
+                    </div>
+                    <div className="dashboard-processing-progress" aria-label={`Avanzamento ${document.analysisProgress}%`}>
+                      <span style={{ width: `${document.analysisProgress}%` }} />
+                    </div>
+                    <div className="dashboard-processing-stages">
+                      <span className={['compressed', 'kept_original'].includes(document.compressionStatus) ? 'done' : ''}>
+                        <FileArchive size={14} /> Compressione
+                      </span>
+                      <span className={['ready', 'partial'].includes(document.analysisStatus) ? 'done' : document.analysisStatus === 'failed' ? 'failed' : ''}>
+                        <ScanLine size={14} /> OCR e parsing
+                      </span>
+                      <span className={document.ragStatus === 'ready' ? 'done' : document.ragStatus === 'failed' ? 'failed' : ''}>
+                        <Layers size={14} /> Indice {document.ragChunkCount > 0 ? `(${document.ragChunkCount})` : ''}
+                      </span>
+                      <span className={document.flashcardStatus === 'ready' ? 'done' : document.flashcardStatus === 'failed' ? 'failed' : ''}>
+                        <BrainCircuit size={14} /> Flashcard
+                      </span>
+                    </div>
+                    {isFailed ? (
+                      <p className="dashboard-processing-error"><AlertTriangle size={14} /> Codice: {document.analysisErrorCode ?? 'elaborazione_non_completata'}. Puoi riprovare dall’upload.</p>
+                    ) : (
+                      <p>{document.analysisStage ? `Fase corrente: ${document.analysisStage}` : isReady ? 'Tutti gli artefatti disponibili.' : 'La coda prosegue in background.'}</p>
+                    )}
+                  </article>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="dashboard-empty-state">
+              <span><ScanLine size={24} /></span>
+              <div><strong>Nessuna elaborazione attiva</strong><p>Carica un PDF: qui vedrai avanzamento e risultati reali di OCR, indice e flashcard.</p></div>
+              <button onClick={() => onRoute('upload')} type="button">Inizia un upload</button>
+            </div>
+          )}
+        </section>
+
+        <section className="dashboard-section">
+          <div className="dashboard-section-head">
+            <div><h2>I tuoi documenti</h2><p>Bozze, materiali inviati e pubblicati associati al tuo account.</p></div>
+          </div>
+          {data.shelves.find((shelf) => shelf.id === 'uploads')?.documents.length ? (
+            <div className="dashboard-doc-list">
+              {data.shelves.find((shelf) => shelf.id === 'uploads')?.documents.map((document) => (
+                <button className="dashboard-doc-row" key={`upload-${document.id}`} onClick={() => onPreview(document)} type="button">
+                  <span><SubjectIcon compact name={document.subject} /></span>
+                  <div><strong>{document.title}</strong><small>{document.subject} · {document.professor}</small></div>
+                  <em>{document.status === 'approved' ? 'Pubblicato' : 'In revisione'}</em>
+                </button>
+              ))}
+            </div>
+          ) : <p className="dashboard-empty">Non hai ancora documenti caricati.</p>}
+        </section>
       </div>
       ) : null}
 
@@ -7241,7 +7472,7 @@ function UserDashboardPage({
               {displayedWallet.purchases.length ? (
                 <div className="dashboard-doc-list">
                   {displayedWallet.purchases.slice(0, 6).map((purchase) => {
-                    const doc = documents.find((item) => item.id === purchase.documentId)
+                    const doc = dashboardDocuments.find((item) => item.id === purchase.documentId)
                     return (
                       <button
                         className="dashboard-doc-row"
@@ -7371,7 +7602,7 @@ function UserDashboardPage({
                 <h2>Archivio flashcard</h2>
                 <p>Filtra per materia, documento, autore, capitolo, sezione, argomento, stato e difficoltà.</p>
               </div>
-              <button onClick={() => setFlashcardFilters(EMPTY_FLASHCARD_FILTERS)} type="button">
+              <button onClick={() => { setFlashcardFilters(EMPTY_FLASHCARD_FILTERS); setFlashcardVisible(12) }} type="button">
                 <RefreshCw size={15} /> Reset filtri
               </button>
             </div>
@@ -7379,49 +7610,49 @@ function UserDashboardPage({
             <div className="flashcard-filter-grid">
               <label>
                 Materia
-                <select value={flashcardFilters.subject} onChange={(event) => setFlashcardFilters((current) => ({ ...current, subject: event.target.value }))}>
+                <select value={flashcardFilters.subject} onChange={(event) => updateFlashcardFilter('subject', event.target.value)}>
                   <option value="all">Tutte</option>
                   {uniqueFlashcardOptions('subject').map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
               </label>
               <label>
                 Documento
-                <select value={flashcardFilters.documentTitle} onChange={(event) => setFlashcardFilters((current) => ({ ...current, documentTitle: event.target.value }))}>
+                <select value={flashcardFilters.documentTitle} onChange={(event) => updateFlashcardFilter('documentTitle', event.target.value)}>
                   <option value="all">Tutti</option>
                   {uniqueFlashcardOptions('documentTitle').map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
               </label>
               <label>
                 Autore
-                <select value={flashcardFilters.author} onChange={(event) => setFlashcardFilters((current) => ({ ...current, author: event.target.value }))}>
+                <select value={flashcardFilters.author} onChange={(event) => updateFlashcardFilter('author', event.target.value)}>
                   <option value="all">Tutti</option>
                   {uniqueFlashcardOptions('documentAuthor').map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
               </label>
               <label>
                 Capitolo
-                <select value={flashcardFilters.chapter} onChange={(event) => setFlashcardFilters((current) => ({ ...current, chapter: event.target.value }))}>
+                <select value={flashcardFilters.chapter} onChange={(event) => updateFlashcardFilter('chapter', event.target.value)}>
                   <option value="all">Tutti</option>
                   {uniqueFlashcardOptions('chapter').map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
               </label>
               <label>
                 Argomento
-                <select value={flashcardFilters.topic} onChange={(event) => setFlashcardFilters((current) => ({ ...current, topic: event.target.value }))}>
+                <select value={flashcardFilters.topic} onChange={(event) => updateFlashcardFilter('topic', event.target.value)}>
                   <option value="all">Tutti</option>
                   {uniqueFlashcardOptions('topic').map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
               </label>
               <label>
                 Sezione
-                <select value={flashcardFilters.section} onChange={(event) => setFlashcardFilters((current) => ({ ...current, section: event.target.value }))}>
+                <select value={flashcardFilters.section} onChange={(event) => updateFlashcardFilter('section', event.target.value)}>
                   <option value="all">Tutte</option>
                   {uniqueFlashcardOptions('section').map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
               </label>
               <label>
                 Stato
-                <select value={flashcardFilters.status} onChange={(event) => setFlashcardFilters((current) => ({ ...current, status: event.target.value as FlashcardDashboardFilters['status'] }))}>
+                <select value={flashcardFilters.status} onChange={(event) => updateFlashcardFilter('status', event.target.value as FlashcardDashboardFilters['status'])}>
                   <option value="all">Tutte</option>
                   <option value="incorrect">Solo sbagliate</option>
                   <option value="correct">Solo corrette</option>
@@ -7432,7 +7663,7 @@ function UserDashboardPage({
               </label>
               <label>
                 Difficoltà
-                <select value={flashcardFilters.difficulty} onChange={(event) => setFlashcardFilters((current) => ({ ...current, difficulty: event.target.value as FlashcardDashboardFilters['difficulty'] }))}>
+                <select value={flashcardFilters.difficulty} onChange={(event) => updateFlashcardFilter('difficulty', event.target.value as FlashcardDashboardFilters['difficulty'])}>
                   <option value="all">Tutte</option>
                   <option value="easy">Facile</option>
                   <option value="medium">Media</option>
@@ -7442,7 +7673,7 @@ function UserDashboardPage({
             </div>
 
             <div className="flashcard-archive-list">
-              {filteredFlashcardRecords.slice(0, 12).map((record) => (
+              {filteredFlashcardRecords.slice(0, flashcardVisible).map((record) => (
                 <article className={`flashcard-archive-row ${record.latestStatus}`} key={record.id}>
                   <div>
                     <span className={`flashcard-status-pill ${record.latestStatus}`}>
@@ -7463,6 +7694,11 @@ function UserDashboardPage({
               ))}
               {!filteredFlashcardRecords.length ? (
                 <p className="dashboard-empty">Nessuna flashcard corrisponde ai filtri selezionati.</p>
+              ) : null}
+              {filteredFlashcardRecords.length > flashcardVisible ? (
+                <button className="dashboard-load-more" onClick={() => setFlashcardVisible((count) => count + 12)} type="button">
+                  Mostra altre 12 · {filteredFlashcardRecords.length - flashcardVisible} rimanenti
+                </button>
               ) : null}
             </div>
           </section>
@@ -7608,6 +7844,54 @@ function UserDashboardPage({
       </div>
       ) : null}
 
+      {activeView === 'creator' ? (
+      <div className="dashboard-view view-creator">
+        <section className="dashboard-section dashboard-creator-hero">
+          <div>
+            <span className="dashboard-kicker"><Trophy size={16} /> Area autore</span>
+            <h2>{sellerSummary?.enabled ? 'Prestazioni dei tuoi materiali' : 'Trasforma i tuoi appunti in materiali utili'}</h2>
+            <p>{sellerSummary?.enabled
+              ? 'Vendite, crediti e qualità didattica provengono dalle operazioni registrate sul tuo account.'
+              : 'Pubblica il profilo autore quando vuoi rendere riconoscibili i tuoi materiali nel catalogo.'}</p>
+          </div>
+          <button onClick={() => onRoute('settings', { hash: 'profilo-pubblico' })} type="button">
+            <User size={16} /> {sellerSummary?.enabled ? 'Gestisci profilo pubblico' : 'Configura profilo autore'}
+          </button>
+        </section>
+
+        <section className="dashboard-creator-stats" aria-label="Statistiche autore">
+          <article><span><FileText size={18} /></span><strong>{sellerSummary?.publishedDocuments ?? 0}</strong><small>documenti pubblicati</small></article>
+          <article><span><Download size={18} /></span><strong>{sellerSummary?.activeSales ?? 0}</strong><small>vendite attive</small></article>
+          <article><span><Wallet size={18} /></span><strong>{sellerSummary?.creditsEarned ?? 0}</strong><small>crediti maturati</small></article>
+          <article><span><TrendingUp size={18} /></span><strong>€{((sellerSummary?.cashBackingMinor ?? 0) / 100).toFixed(2)}</strong><small>copertura economica</small></article>
+        </section>
+
+        <section className="dashboard-section author-quality-section">
+          <div className="dashboard-section-head">
+            <div><h2>Qualità didattica</h2><p>Valutazioni aggregate delle flashcard collegate ai tuoi documenti.</p></div>
+            {didacticAverageQuality !== null ? <strong>{didacticAverageQuality}%</strong> : null}
+          </div>
+          {didacticQualityRows.length ? (
+            <div className="author-quality-grid">
+              {didacticQualityRows.map((quality) => (
+                <article className="author-quality-card" key={`creator-${quality.documentId}`}>
+                  <div><strong>{quality.documentTitle}</strong><span>{quality.reviewerCount} studenti · {quality.totalVotes} valutazioni</span></div>
+                  <div className="author-quality-meter"><span style={{ width: `${quality.qualityPercent ?? 0}%` }} /></div>
+                  <footer><em>{quality.qualityPercent ?? 0}% utili</em><small>{quality.topPositiveTopic ?? 'In attesa di più valutazioni'}</small></footer>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="dashboard-empty-state">
+              <span><ThumbsUp size={24} /></span>
+              <div><strong>Nessuna metrica inventata</strong><p>Le statistiche compariranno dopo valutazioni e vendite reali.</p></div>
+              <button onClick={() => selectView('documents')} type="button">Controlla i documenti</button>
+            </div>
+          )}
+        </section>
+      </div>
+      ) : null}
+
       {sidePanel ? (
         <div className="dashboard-modal" role="dialog" aria-modal="true" aria-label={sidePanel === 'notifications' ? 'Tutte le notifiche' : 'Storico crediti completo'}>
           <button className="preview-backdrop" onClick={() => setSidePanel(null)} aria-label="Chiudi" type="button" />
@@ -7619,12 +7903,17 @@ function UserDashboardPage({
             {sidePanel === 'notifications' ? (
               <div className="dashboard-notification-list">
                 {data.notifications.map((notification) => (
-                  <article className={notification.tone} key={`modal-${notification.id}`}>
+                  <article className={`${notification.tone} ${notification.unread ? 'unread' : ''}`} key={`modal-${notification.id}`}>
                     <span><Bell size={16} /></span>
                     <div>
                       <strong>{notification.title}</strong>
                       <p>{notification.body}</p>
                       <small>{notification.time}</small>
+                      {notification.unread ? (
+                        <button className="dashboard-notification-read" onClick={() => void markNotificationRead(notification.id)} type="button">
+                          Segna come letta
+                        </button>
+                      ) : null}
                     </div>
                   </article>
                 ))}
@@ -7681,7 +7970,7 @@ function SettingsPage({
   onSellerProfileUpdated: () => Promise<void>
 }) {
   const [prefs, setPrefs] = useState<NotificationPrefs | null>(null)
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'local' | 'error'>('idle')
   const [sellerProfile, setSellerProfile] = useState<SellerProfilePreferences>(() => ({
     publicDisplayName: user.name,
     enabled: false,
@@ -7706,6 +7995,12 @@ function SettingsPage({
       active = false
     }
   }, [user])
+
+  useEffect(() => {
+    const target = window.location.hash.replace('#', '')
+    if (!target) return
+    window.requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }, [])
 
   useEffect(() => {
     if (user.isDemo) return undefined
@@ -7819,8 +8114,8 @@ function SettingsPage({
         [categoryId]: { ...current[categoryId], [channel]: !current[categoryId][channel] },
       }
       setSaveState('saving')
-      void saveNotificationPrefs(user, next).then(() => {
-        setSaveState('saved')
+      void saveNotificationPrefs(user, next).then((result) => {
+        setSaveState(result.remoteSynced ? 'saved' : result.localSaved ? 'local' : 'error')
         window.setTimeout(() => setSaveState('idle'), 1600)
       })
       return next
@@ -7868,7 +8163,7 @@ function SettingsPage({
           </article>
           {!user.isDemo ? (
             <>
-            <article className="settings-credit-card settings-public-profile">
+            <article className="settings-credit-card settings-public-profile" id="profilo-pubblico" style={{ scrollMarginTop: '90px' }}>
               <span className="settings-credit-label"><User size={16} /> Profilo venditore</span>
               <p>Pubblica nome e materiali solo se vuoi comparire nelle schede e nella classifica autori.</p>
               <label className="settings-public-name">
@@ -7918,7 +8213,7 @@ function SettingsPage({
           </button>
         </aside>
 
-        <section className="settings-notifications">
+        <section className="settings-notifications" id="notifiche" style={{ scrollMarginTop: '90px' }}>
           <div className="settings-section-head">
             <div>
               <h2><Bell size={18} /> Preferenze notifiche</h2>
@@ -7929,6 +8224,10 @@ function SettingsPage({
                 <><Loader2 className="spin" size={14} /> Salvo…</>
               ) : saveState === 'saved' ? (
                 <><Check size={14} /> Salvato</>
+              ) : saveState === 'local' ? (
+                <><AlertTriangle size={14} /> Solo su questo dispositivo</>
+              ) : saveState === 'error' ? (
+                <><AlertTriangle size={14} /> Non salvato</>
               ) : (
                 'Salvataggio automatico'
               )}
@@ -8735,6 +9034,7 @@ function App() {
         authUser ? (
           <UserDashboardPage
             credits={credits}
+            entryRoute={route}
             wallet={walletState}
             documents={visibleDocuments}
             onPreview={setPreviewDocument}
