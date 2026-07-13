@@ -74,7 +74,7 @@ import demoPage04 from './assets/generated/demo-page-04.webp'
 import heroDocuments from './assets/generated/hero-documents.webp'
 import libraryNotes from './assets/generated/library-notes.webp'
 import loginStudy from './assets/generated/login-study.webp'
-import logoMark from './assets/generated/logo-mark.webp'
+import logoMark from './assets/generated/logo-mark-v2.webp'
 import premiumStack from './assets/generated/premium-stack.webp'
 import uploadBackpack from './assets/generated/upload-backpack.webp'
 import {
@@ -691,6 +691,47 @@ function Brand({ compact = false }: { compact?: boolean }) {
   )
 }
 
+function SiteFooter({
+  onRoute,
+  onAuth,
+}: {
+  onRoute: (route: Route) => void
+  onAuth: (mode: AuthMode) => void
+}) {
+  return (
+    <footer className="site-footer section-wrap">
+      <div className="site-footer-main">
+        <div className="site-footer-brand">
+          <Brand compact />
+          <p>Appunti, flashcard e strumenti di studio pensati per gli studenti della Statale di Milano.</p>
+        </div>
+
+        <nav className="site-footer-group" aria-label="Piattaforma">
+          <strong>Piattaforma</strong>
+          <button onClick={() => onRoute('app')} type="button">Esplora</button>
+          <button onClick={() => onRoute('premium')} type="button">Premium</button>
+          <button onClick={() => onRoute('upload')} type="button">Carica appunti</button>
+          <button onClick={() => onAuth('login')} type="button">Accedi</button>
+        </nav>
+
+        <nav className="site-footer-group" aria-label="Informazioni e tutela">
+          <strong>Informazioni e tutela</strong>
+          <button onClick={() => onRoute('privacy')} type="button">Privacy</button>
+          <button onClick={() => onRoute('terms')} type="button">Termini</button>
+          <button onClick={() => onRoute('cookies')} type="button">Cookie</button>
+          <button onClick={() => onRoute('sales')} type="button">Vendite e rimborsi</button>
+          <button onClick={() => onRoute('copyright')} type="button">Segnalazioni</button>
+        </nav>
+      </div>
+
+      <div className="site-footer-bottom">
+        <span>© {new Date().getFullYear()} UnimiDoc</span>
+        <p>Progetto indipendente, non affiliato con l’Università degli Studi di Milano.</p>
+      </div>
+    </footer>
+  )
+}
+
 function HeaderSearch({ onSearch }: { onSearch: (query: string) => void }) {
   const [value, setValue] = useState('')
   const rotatingCourse = useRotatingCourseName()
@@ -824,13 +865,14 @@ function Header({
                   type="button"
                   aria-haspopup="menu"
                   aria-expanded={menuOpen}
+                  aria-controls="user-account-menu"
                 >
                   <span>{initials}</span>
                   <small>Ciao, {firstName}</small>
                   <ChevronDown size={15} className="user-button-chevron" />
                 </button>
                 {menuOpen ? (
-                  <div className="user-dropdown" role="menu">
+                  <div className="user-dropdown" id="user-account-menu" role="menu" aria-label="Menu account">
                     <div className="user-dropdown-head">
                       <span className="user-dropdown-avatar">{initials}</span>
                       <div className="user-dropdown-id">
@@ -1609,21 +1651,7 @@ function LandingPage({
         </div>
       </section>
 
-      <footer className="site-footer section-wrap">
-        <Brand compact />
-        <nav>
-          <button onClick={() => onRoute('app')} type="button">Esplora</button>
-          <button onClick={() => onRoute('premium')} type="button">Premium</button>
-          <button onClick={() => onRoute('upload')} type="button">Carica appunti</button>
-          <button onClick={() => onAuth('login')} type="button">Accedi</button>
-          <button onClick={() => onRoute('privacy')} type="button">Privacy</button>
-          <button onClick={() => onRoute('terms')} type="button">Termini</button>
-          <button onClick={() => onRoute('cookies')} type="button">Cookie</button>
-          <button onClick={() => onRoute('sales')} type="button">Vendite e rimborsi</button>
-          <button onClick={() => onRoute('copyright')} type="button">Segnalazioni</button>
-        </nav>
-        <p>UnimiDoc è un progetto indipendente e non è affiliato con l’Università degli Studi di Milano.</p>
-      </footer>
+      <SiteFooter onAuth={onAuth} onRoute={onRoute} />
     </main>
   )
 }

@@ -67,7 +67,7 @@ button {
   place-items: center;
   border-radius: 10px;
   border: 1px solid var(--border-soft);
-  background: #fffdf8;
+  background: #fff;
 }
 
 .brand-icon img {
@@ -1397,22 +1397,88 @@ button {
 }
 
 .site-footer {
-  display: grid;
-  grid-template-columns: auto 1fr minmax(260px, 0.8fr);
-  gap: 30px;
-  align-items: start;
-  padding: 46px 0 34px;
+  display: block;
+  margin-top: 64px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 20px 20px 0 0;
+  padding: 0 clamp(24px, 4vw, 48px);
   color: var(--muted);
+  background: linear-gradient(145deg, #f8fcfa 0%, #fff 72%);
 }
 
-.site-footer nav {
-  display: flex;
-  flex-wrap: wrap;
+.site-footer-main {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.45fr) repeat(2, minmax(170px, 0.75fr));
+  gap: clamp(34px, 5vw, 72px);
+  padding: 46px 0 38px;
+}
+
+.site-footer-brand {
+  display: grid;
+  align-content: start;
+  justify-items: start;
   gap: 16px;
 }
 
-.site-footer p {
+.site-footer-brand p {
+  max-width: 390px;
   margin: 0;
+  color: var(--text-soft);
+  line-height: 1.65;
+}
+
+.site-footer-group {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 6px;
+}
+
+.site-footer-group > strong {
+  margin-bottom: 8px;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.site-footer .site-footer-group button {
+  min-height: 36px;
+  justify-content: flex-start;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--text-soft);
+  font-weight: 700;
+}
+
+.site-footer .site-footer-group button:hover,
+.site-footer .site-footer-group button:focus-visible {
+  padding-inline: 8px;
+}
+
+.site-footer-bottom {
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 24px;
+  border-top: 1px solid var(--border);
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.site-footer-bottom > span {
+  color: var(--text);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.site-footer-bottom p {
+  margin: 0;
+  text-align: right;
   line-height: 1.5;
 }
 
@@ -8477,6 +8543,7 @@ button.dashboard-stat:hover {
   /* App header (tablet & mobile): brand + account controls on the top line,
      full-width search below, nav as a scrollable row. No overlap at any width. */
   .app-header .header-inner {
+    position: relative;
     grid-template-columns: auto 1fr;
     grid-template-areas:
       'brand actions'
@@ -8491,7 +8558,7 @@ button.dashboard-stat:hover {
     grid-area: brand;
   }
 
-  .app-header .header-inner > .header-search {
+  .app-header .header-inner > .header-search-form {
     grid-area: search;
     width: 100%;
   }
@@ -8500,13 +8567,30 @@ button.dashboard-stat:hover {
     grid-area: nav;
     justify-content: flex-start;
     overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
     width: 100%;
+  }
+
+  .app-header .header-inner > .main-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .app-header .header-inner > .header-actions {
     grid-area: actions;
     justify-content: flex-end;
-    width: 100%;
+    justify-self: end;
+    width: auto;
+    overflow: visible;
+  }
+
+  .app-header .user-menu {
+    position: static;
+  }
+
+  .app-header .user-dropdown {
+    top: calc(100% + 8px);
+    right: 0;
   }
 
   .main-nav,
@@ -8593,8 +8677,9 @@ button.dashboard-stat:hover {
     grid-template-columns: 1fr;
   }
 
-  .site-footer {
-    grid-template-columns: 1fr;
+  .site-footer-main {
+    grid-template-columns: minmax(240px, 1.2fr) repeat(2, minmax(150px, 0.8fr));
+    gap: 30px;
   }
 }
 
@@ -8919,6 +9004,8 @@ button.dashboard-stat:hover {
 /* ============================ User account dropdown ============================ */
 .user-menu {
   position: relative;
+  z-index: 70;
+  flex: 0 0 auto;
 }
 
 .user-button-chevron {
@@ -10191,8 +10278,8 @@ button.dashboard-stat:hover {
   }
 }
 
-/* Header compatto su schermi stretti: la chip crediti perde l'etichetta e il
-   brand resta solo logo, così la riga brand+azioni non può mai sovrapporsi. */
+/* Header compatto su schermi stretti: la chip crediti perde l'etichetta e le
+   azioni conservano target touch regolari senza comprimere il brand. */
 @media (max-width: 560px) {
   .credits-chip .credits-chip-label {
     display: none;
@@ -10200,6 +10287,7 @@ button.dashboard-stat:hover {
 
   .app-header .header-actions {
     gap: 8px;
+    overflow: visible;
   }
 
   .app-header .credits-chip,
@@ -10209,7 +10297,7 @@ button.dashboard-stat:hover {
   }
 }
 
-@media (max-width: 430px) {
+@media (max-width: 360px) {
   .app-header .brand-button > span:not(.brand-icon) {
     display: none;
   }
@@ -10225,10 +10313,16 @@ button.dashboard-stat:hover {
   }
 }
 
-/* La form della ricerca globale è trasparente per la grid dell'header:
-   il label .header-search resta il figlio diretto che le regole già stilano. */
+/* La form è il vero elemento della grid: in tablet/mobile occupa l'intera
+   seconda riga e il campo interno può espandersi senza dipendere dal DOM. */
 .header-search-form {
-  display: contents;
+  display: block;
+  min-width: 0;
+  width: 100%;
+}
+
+.header-search-form .header-search {
+  width: 100%;
 }
 
 .active-query-pill {
@@ -11284,7 +11378,81 @@ button.dashboard-stat:hover {
   .legal-page { padding-top: 24px; }
   .legal-operator-card { grid-template-columns: minmax(0, 1fr); }
   .legal-config-warning { align-items: flex-start; }
-  .site-footer nav { gap: 10px 14px; }
+}
+
+@media (max-width: 760px) {
+  .site-footer {
+    margin-top: 48px;
+    padding-inline: 22px;
+  }
+
+  .site-footer-main {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 30px 18px;
+    padding: 34px 0 28px;
+  }
+
+  .site-footer-brand {
+    grid-column: 1 / -1;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .site-footer-brand p {
+    max-width: 430px;
+  }
+
+  .site-footer-group {
+    justify-items: center;
+    text-align: center;
+  }
+
+  .site-footer-group + .site-footer-group {
+    border-left: 1px solid var(--border);
+  }
+
+  .site-footer-group > strong {
+    min-height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    letter-spacing: 0.035em;
+  }
+
+  .site-footer .site-footer-group button {
+    min-height: 34px;
+    justify-content: center;
+    padding-inline: 4px;
+    text-align: center;
+    white-space: normal;
+  }
+
+  .site-footer-bottom {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 18px 0 22px;
+    text-align: center;
+  }
+
+  .site-footer-bottom p {
+    text-align: center;
+  }
+}
+
+@media (max-width: 420px) {
+  .site-footer {
+    width: calc(100% - 16px);
+    padding-inline: 16px;
+  }
+
+  .site-footer-main {
+    gap-inline: 12px;
+  }
+
+  .site-footer .site-footer-group button {
+    font-size: 13px;
+  }
 }
 
 /* --- Catalogo materie+docenti da DB sulle pagine /corsi/:slug ------------- */
