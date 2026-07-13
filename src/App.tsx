@@ -772,7 +772,6 @@ function Header({
   credits,
   user,
   onRoute,
-  onAuth,
   onSearch,
   onSignOut,
 }: {
@@ -781,12 +780,12 @@ function Header({
   credits: number
   user: AppAuthUser | null
   onRoute: (route: Route, options?: { hash?: string }) => void
-  onAuth: (mode: AuthMode) => void
   onSearch: (query: string) => void
   onSignOut: () => void
 }) {
-  const appArea =
-    route === 'app' || route === 'premium' || route === 'upload' || route === 'library' || route === 'dashboard' || route === 'settings'
+  // Every product page shares the Explore header. The landing page keeps its
+  // search inside the hero so the first impression remains intentionally calm.
+  const appArea = route !== 'landing'
   const firstName = user?.name.split(' ')[0] || 'Giulia'
   const initials = user?.name
     .split(' ')
@@ -842,18 +841,6 @@ function Header({
           <button className={route === 'upload' ? 'active' : ''} onClick={() => onRoute('upload')} type="button">
             Carica appunti
           </button>
-          <button
-            className={route === 'dashboard' ? 'active nav-reserved-area' : 'nav-reserved-area'}
-            onClick={() => (isLoggedIn ? onRoute('dashboard') : onAuth('login'))}
-            type="button"
-          >
-            Area riservata
-          </button>
-          {!isLoggedIn ? (
-            <button className="nav-join" onClick={() => onAuth('signup')} type="button">
-              Inizia gratis
-            </button>
-          ) : null}
         </nav>
 
         <div className="header-actions">
@@ -9022,7 +9009,7 @@ function App() {
   return (
     <>
       {route !== 'login' && route !== 'signup' ? (
-        <Header route={route} isLoggedIn={isLoggedIn} credits={credits} user={authUser} onRoute={navigateRoute} onAuth={goAuth} onSearch={searchDocuments} onSignOut={() => void handleSignOut()} />
+        <Header route={route} isLoggedIn={isLoggedIn} credits={credits} user={authUser} onRoute={navigateRoute} onSearch={searchDocuments} onSignOut={() => void handleSignOut()} />
       ) : null}
       {route === 'landing' ? (
         <LandingPage onRoute={navigateRoute} onAuth={goAuth} onExploreSubject={exploreSubject} onOpenDemo={() => setDemoOpen(true)} onOpenDegree={openDegreePage} />
