@@ -2635,9 +2635,6 @@ function LoginPage({
         <img src={loginStudy} alt="Appunti salvati e sicuri" />
       </section>
       <section className="auth-panel">
-        <button className="auth-close" onClick={() => onRoute('landing')} aria-label="Torna alla landing" type="button">
-          <X size={18} />
-        </button>
         <div className="auth-tabs">
           <button className={mode === 'login' ? 'active' : ''} onClick={() => onMode('login')} type="button">
             Accedi
@@ -8523,6 +8520,7 @@ function App() {
   const [previewDocument, setPreviewDocument] = useState<DocumentItem | null>(null)
   const [demoOpen, setDemoOpen] = useState(false)
   const [toast, setToast] = useState('')
+  const previousRouteRef = useRef<Route>(initialRoute)
   // Until the initial Supabase session check resolves we must not run the private
   // route guard, otherwise a refresh on /dashboard bounces a valid session to login.
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured)
@@ -8638,7 +8636,11 @@ function App() {
   }, [route, visibleDocuments])
 
   useEffect(() => {
-    window.scrollTo({ left: 0, top: 0 })
+    const isAuthRoute = (candidate: Route) => candidate === 'login' || candidate === 'signup'
+    const isAuthTabSwitch = isAuthRoute(previousRouteRef.current) && isAuthRoute(route)
+
+    if (!isAuthTabSwitch) window.scrollTo({ left: 0, top: 0 })
+    previousRouteRef.current = route
   }, [route])
 
   useEffect(() => {
@@ -8998,6 +9000,7 @@ function App() {
   }
 
   const switchAuthMode = (mode: AuthMode) => {
+    if (mode === authMode) return
     setAuthMode(mode)
     const nextPath = new URLSearchParams(window.location.search).get('next')
     navigateRoute(mode === 'signup' ? 'signup' : 'login', {

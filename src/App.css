@@ -2616,17 +2616,6 @@ button {
   box-shadow: 0 26px 70px rgba(16, 24, 40, 0.14);
 }
 
-.auth-close {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 36px;
-  height: 36px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #fff;
-}
-
 .auth-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
