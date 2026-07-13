@@ -3,6 +3,7 @@
 
 import { jsonResponse, errorResponse, AppError } from '../_shared/http.ts'
 import { adminClient } from '../_shared/supabase.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 import {
   requireBillingRuntime,
   sha256Hex,
@@ -207,8 +208,10 @@ async function dispatchEvent(
   return 'ignored'
 }
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
+  const logger = createRequestLogger(req)
+  logger.info('billing_webhook_received')
+
   if (req.method !== 'POST') return jsonResponse({ error: { code: 'method_not_allowed' } }, 405)
 
   let storedEventId: string | null = null

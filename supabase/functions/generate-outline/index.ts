@@ -3,7 +3,7 @@
 // deterministic candidates (title, page, evidence), never the whole PDF.
 
 import { config } from '../_shared/env.ts'
-import { preflight, jsonResponse, errorResponse, errors } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
 import {
   adminClient,
   requireUser,
@@ -16,6 +16,8 @@ import {
 } from '../_shared/supabase.ts'
 import { deepseekChat, deepseekCost, extractJson } from '../_shared/ai.ts'
 import { buildOutlinePrompt, type OutlineCandidateForPrompt } from '../_shared/prompts.ts'
+import { createRequestLogger } from '../_shared/log.ts'
+
 
 type RefinedOutlineEntry = {
   title?: string
@@ -111,10 +113,12 @@ function sanitizeOutline(
   return out.sort((a, b) => Number(a.page_start) - Number(b.page_start) || Number(a.level) - Number(b.level))
 }
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
+  const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
+
+  logger.info('generate_outline_start')
 
   try {
     const { id: userId } = await requireUser(req)
@@ -123,7 +127,7 @@ function sanitizeOutline(
 
     // Validate the payload BEFORE spending rate-limit quota: a malformed
     // request must never consume the user's monthly budget.
-    const body = await req.json().catch(() => null)
+    const body = await parseJsonBody(req)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
 
     const pageCount = Math.max(1, Math.min(2000, Math.round(Number((body as Record<string, unknown>).pageCount ?? 1)) || 1))

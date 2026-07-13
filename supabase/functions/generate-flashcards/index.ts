@@ -10,7 +10,7 @@
 // Access requires an active Premium plan or the flashcard-specific entitlement.
 
 import { config } from '../_shared/env.ts'
-import { preflight, jsonResponse, errorResponse, errors, AppError } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody } from '../_shared/http.ts'
 import {
   adminClient,
   requireUser,
@@ -21,6 +21,7 @@ import {
   getCached,
   putCached,
   sha256Hex,
+  type AdminClient,
 } from '../_shared/supabase.ts'
 import { deepseekChat, deepseekCost, extractJson } from '../_shared/ai.ts'
 import { buildFlashcardsPrompt } from '../_shared/prompts.ts'
@@ -79,7 +80,7 @@ function sanitizeCards(cards: GeneratedCard[], max: number): GeneratedCard[] {
     const admin = adminClient()
     await requireAiFlashcards(admin, userId)
 
-    const body = await req.json().catch(() => null)
+    const body = await parseJsonBody(req)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
 
     // Persist cards explicitly reviewed by the document owner without another
@@ -283,9 +284,8 @@ function sourcePages(card: GeneratedCard, chunk: TopicChunk | undefined): { star
   return { start, end }
 }
 
-// deno-lint-ignore no-explicit-any
 async function persistDocumentCards(params: {
-  admin: any
+  admin: AdminClient
   userId: string
   documentId: string
   subject: string | null
@@ -473,8 +473,7 @@ async function saveReviewedFromUpload(
   return jsonResponse({ savedIds, savedCount: savedIds.length, premium: true, source: 'human_reviewed' }, 200, req)
 }
 
-// deno-lint-ignore no-explicit-any
-async function generateFromDocument(req: Request, admin: any, userId: string, body: Record<string, unknown>) {
+async function generateFromDocument(req: Request, admin: AdminClient, userId: string, body: Record<string, unknown>) {
   const documentId = String(body.documentId ?? '')
   if (!UUID_RE.test(documentId)) throw errors.badRequest('documentId non valido.')
   const language = String(body.language ?? 'it')

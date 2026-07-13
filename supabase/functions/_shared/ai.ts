@@ -1,5 +1,6 @@
 import { config } from './env.ts'
 import { errors, fetchWithRetry } from './http.ts'
+import { logError } from './log.ts'
 
 // --------------------------------------------------------------------------
 // AI router — hard separation between text (DeepSeek) and vision (Gemini).
@@ -70,7 +71,7 @@ export async function deepseekChat({
   })
 
   if (!res.ok) {
-    console.error('Text AI upstream error:', { status: res.status, body: await safeText(res) })
+    logError('text_ai_upstream_error', null, { status: res.status })
     throw errors.upstream()
   }
   const data = await res.json()
@@ -125,7 +126,7 @@ export async function geminiVision({
   })
 
   if (!res.ok) {
-    console.error('Vision AI upstream error:', { status: res.status, body: await safeText(res) })
+    logError('vision_ai_upstream_error', null, { status: res.status })
     throw errors.upstream()
   }
   const data = await res.json()
@@ -153,10 +154,4 @@ export function extractJson<T>(raw: string): T | null {
   }
 }
 
-async function safeText(res: Response): Promise<string> {
-  try {
-    return (await res.text()).slice(0, 200)
-  } catch {
-    return ''
-  }
-}
+

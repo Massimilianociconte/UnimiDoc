@@ -6,6 +6,7 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ProcessingError } from './errors.js'
+import { logError } from './logger.ts'
 import type { ClaimedPdfJob } from './types.js'
 
 const HASH_RE = /^[0-9a-f]{64}$/
@@ -115,6 +116,6 @@ export async function removeStorageObjectBestEffort(
 ): Promise<void> {
   const { error } = await supabase.storage.from(bucket).remove([objectPath])
   if (error) {
-    console.warn(JSON.stringify({ event: 'storage_cleanup_failed', bucket, objectPath, message: error.message }))
+    logError('storage_cleanup_failed', error, { bucket, objectPath })
   }
 }

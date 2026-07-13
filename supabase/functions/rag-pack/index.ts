@@ -9,23 +9,26 @@
 // future Flutter app can download packs and search offline; online answers
 // still go through rag-query so the server stays the source of truth.
 
-import { preflight, jsonResponse, errorResponse, errors, AppError } from '../_shared/http.ts'
-import { requireUser, adminClient } from '../_shared/supabase.ts'
+import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody } from '../_shared/http.ts'
+import { requireUser, adminClient, type AdminClient } from '../_shared/supabase.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 import { getEmbeddingProvider } from '../_shared/embeddings.ts'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
+  const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
 
+  logger.info('rag_pack_start')
+
   try {
     const { id: userId } = await requireUser(req)
-    const admin = adminClient()
+    const admin: AdminClient = adminClient()
     const provider = getEmbeddingProvider()
 
-    const body = await req.json().catch(() => null)
+    const body = await parseJsonBody(req)
     const documentId = String(body?.documentId ?? '')
     if (!documentId) throw errors.badRequest('documentId obbligatorio.')
     if (!UUID_RE.test(documentId)) throw errors.badRequest('documentId non valido.')

@@ -5,7 +5,7 @@
 // previews and confirms before saving.
 
 import { config } from '../_shared/env.ts'
-import { preflight, jsonResponse, errorResponse, errors } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
 import {
   adminClient,
   requireUser,
@@ -18,6 +18,7 @@ import {
   sha256Hex,
 } from '../_shared/supabase.ts'
 import { geminiVision, geminiCost, extractJson } from '../_shared/ai.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 import { buildImageOcclusionPrompt } from '../_shared/prompts.ts'
 
 type Candidate = {
@@ -74,10 +75,12 @@ function sanitize(candidates: Candidate[], max: number): Candidate[] {
 
 const round = (n: number) => Math.round(n * 1000) / 1000
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
+  const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
+
+  logger.info('image_occlusion_start')
 
   try {
     const { id: userId } = await requireUser(req)
@@ -86,7 +89,7 @@ const round = (n: number) => Math.round(n * 1000) / 1000
 
     // Validate the payload BEFORE spending rate-limit quota: a malformed
     // request must never consume the user's monthly budget.
-    const body = await req.json().catch(() => null)
+    const body = await parseJsonBody(req)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
     const imageBase64 = String(body.imageBase64 ?? '')
     if (imageBase64.length < 100) throw errors.badRequest('imageBase64 mancante o non valida.')

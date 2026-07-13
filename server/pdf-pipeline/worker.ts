@@ -5,6 +5,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { checkRuntimeDependencies, CommandError } from './commands.js'
 import { loadWorkerConfig, type WorkerConfig } from './config.js'
 import { lostLeaseError, normalizeProcessingError, ProcessingError } from './errors.js'
+import { log, logError, createJobLogger, logJobMetric } from './logger.ts'
 import { PdfArtifactStore } from './persistence.js'
 import { PdfJobQueue } from './queue.js'
 import { executePdfStage } from './stages.js'
@@ -18,9 +19,7 @@ type WorkerRuntime = {
   shutdown: AbortSignal
 }
 
-function log(event: string, fields: Record<string, unknown> = {}): void {
-  console.log(JSON.stringify({ timestamp: new Date().toISOString(), event, ...fields }))
-}
+// Note: structured `log` and `logError` are imported from ./logger.ts above.
 
 function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve()
@@ -52,6 +51,12 @@ function technicalDetails(error: unknown): Record<string, unknown> {
 
 async function processJob(runtime: WorkerRuntime, job: ClaimedPdfJob): Promise<void> {
   const startedAt = Date.now()
+  const jobLogger = createJobLogger(job.jobId, job.runId, job.documentId, {
+    jobType: job.jobType,
+    attempt: job.attempt,
+    workerId: runtime.config.workerId,
+  })
+
   const jobAbort = new AbortController()
   const forwardShutdown = () => jobAbort.abort(runtime.shutdown.reason)
   runtime.shutdown.addEventListener('abort', forwardShutdown, { once: true })
@@ -71,6 +76,7 @@ async function processJob(runtime: WorkerRuntime, job: ClaimedPdfJob): Promise<v
       if (!owned) {
         lostLease = true
         jobAbort.abort(lostLeaseError())
+        jobLogger.leaseContention('lost_during_heartbeat')
         throw lostLeaseError()
       }
     } finally {
@@ -80,12 +86,7 @@ async function processJob(runtime: WorkerRuntime, job: ClaimedPdfJob): Promise<v
 
   const heartbeatTimer = setInterval(() => {
     void heartbeat().catch((error) => {
-      log('pdf_job_heartbeat_failed', {
-        jobId: job.jobId,
-        runId: job.runId,
-        documentId: job.documentId,
-        error: error instanceof Error ? error.message : String(error),
-      })
+      jobLogger.error('pdf_job_heartbeat_failed', error)
       jobAbort.abort(error)
     })
   }, runtime.config.heartbeatMs)
@@ -93,14 +94,8 @@ async function processJob(runtime: WorkerRuntime, job: ClaimedPdfJob): Promise<v
 
   try {
     workDir = await mkdtemp(path.join(runtime.config.tempRoot, `job-${job.jobType}-`))
-    log('pdf_job_started', {
-      jobId: job.jobId,
-      runId: job.runId,
-      documentId: job.documentId,
-      jobType: job.jobType,
-      attempt: job.attempt,
-      workerId: runtime.config.workerId,
-    })
+    jobLogger.info('pdf_job_started')
+
     const execution = await executePdfStage(job, {
       supabase: runtime.supabase,
       store: runtime.store,
@@ -109,32 +104,29 @@ async function processJob(runtime: WorkerRuntime, job: ClaimedPdfJob): Promise<v
       signal: jobAbort.signal,
       progress: heartbeat,
     })
+
     if (jobAbort.signal.aborted || lostLease) throw lostLeaseError()
+
     const completed = await runtime.queue.complete(job, execution.result, execution.skipped === true)
     if (!completed) {
       lostLease = true
+      jobLogger.leaseContention('complete_failed')
       throw lostLeaseError()
     }
+
     await execution.cleanup?.()
-    log('pdf_job_completed', {
-      jobId: job.jobId,
-      runId: job.runId,
-      documentId: job.documentId,
-      jobType: job.jobType,
-      skipped: execution.skipped === true,
-      durationMs: Date.now() - startedAt,
-    })
+
+    const durationMs = Date.now() - startedAt
+    jobLogger.info('pdf_job_completed', { skipped: execution.skipped === true, durationMs })
+    logJobMetric(job.jobId, job.runId, job.documentId, 'duration_ms', durationMs, { jobType: job.jobType })
+
   } catch (error) {
     const normalized = normalizeProcessingError(error)
     if (lostLease || normalized.code === 'LOST_LEASE') {
-      log('pdf_job_lost_lease', {
-        jobId: job.jobId,
-        runId: job.runId,
-        documentId: job.documentId,
-        jobType: job.jobType,
-      })
+      jobLogger.error('pdf_job_lost_lease', error)
       return
     }
+
     let resultingStatus = 'fail_rpc_unavailable'
     try {
       resultingStatus = await runtime.queue.fail(job, {
@@ -145,23 +137,17 @@ async function processJob(runtime: WorkerRuntime, job: ClaimedPdfJob): Promise<v
         metrics: { durationMs: Date.now() - startedAt, lastProgress, lastStage },
       })
     } catch (failureUpdateError) {
-      log('pdf_job_failure_update_failed', {
-        jobId: job.jobId,
-        runId: job.runId,
-        documentId: job.documentId,
-        error: failureUpdateError instanceof Error ? failureUpdateError.message : String(failureUpdateError),
-      })
+      jobLogger.error('pdf_job_failure_update_failed', failureUpdateError)
     }
-    log('pdf_job_failed', {
-      jobId: job.jobId,
-      runId: job.runId,
-      documentId: job.documentId,
-      jobType: job.jobType,
+
+    const durationMs = Date.now() - startedAt
+    jobLogger.error('pdf_job_failed', error, {
       code: normalized.code,
       retryable: normalized.retryable,
       resultingStatus,
-      durationMs: Date.now() - startedAt,
+      durationMs,
     })
+    logJobMetric(job.jobId, job.runId, job.documentId, 'duration_ms', durationMs, { jobType: job.jobType, status: 'failed', code: normalized.code })
   } finally {
     clearInterval(heartbeatTimer)
     runtime.shutdown.removeEventListener('abort', forwardShutdown)
@@ -238,11 +224,7 @@ export async function runPdfWorker(input: { once?: boolean; env?: NodeJS.Process
 const directEntry = process.argv[1] ? pathToFileURL(process.argv[1]).href : ''
 if (import.meta.url === directEntry) {
   runPdfWorker({ once: process.argv.includes('--once') }).catch((error) => {
-    console.error(JSON.stringify({
-      timestamp: new Date().toISOString(),
-      event: 'pdf_worker_fatal',
-      error: error instanceof Error ? error.message : String(error),
-    }))
+    logError('pdf_worker_fatal', error)
     process.exitCode = 1
   })
 }

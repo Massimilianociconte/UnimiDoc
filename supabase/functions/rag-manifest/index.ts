@@ -11,16 +11,19 @@
 
 import { preflight, jsonResponse, errorResponse } from '../_shared/http.ts'
 import { requireUser, adminClient } from '../_shared/supabase.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 import { getEmbeddingProvider } from '../_shared/embeddings.ts'
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
+  const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
 
+  logger.info('rag_manifest_start')
+
   try {
     const { id: userId } = await requireUser(req)
-    const admin = adminClient()
+    const admin: AdminClient = adminClient()
     const provider = getEmbeddingProvider()
 
     const { data: accessible } = await admin.rpc('rag_accessible_document_ids', { p_user: userId })

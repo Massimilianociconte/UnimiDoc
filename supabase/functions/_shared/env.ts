@@ -85,6 +85,14 @@ export const config = {
     ragQueriesPremiumPerMonth: num('RAG_MAX_QUERIES_PREMIUM_PER_MONTH', 1000),
     ragIndexesPerMonth: num('RAG_MAX_INDEX_RUNS_PER_MONTH', 60),
   },
+
+  rag: {
+    hybridAlpha: num('RAG_HYBRID_ALPHA', 0.30),
+    mmrLambda: num('RAG_MMR_LAMBDA', 0.65),
+    recallK: num('RAG_RECALL_K', 30),
+    minSimilarity: num('RAG_MIN_SIMILARITY', 0.15),
+    maxContextChars: num('RAG_MAX_CONTEXT_CHARS', 14000),
+  },
 }
 
 export type AiFeature =

@@ -1,4 +1,5 @@
 import { config } from './env.ts'
+import { logError } from './log.ts'
 
 function allowedOrigins(): string[] {
   const origins = config.corsOrigins.length > 0 ? config.corsOrigins : [config.corsOrigin].filter(Boolean)
@@ -73,7 +74,7 @@ export function errorResponse(error: unknown, req?: Request): Response {
   if (error instanceof AppError) {
     return jsonResponse({ error: { code: error.code, message: error.message } }, error.status, req)
   }
-  console.error('Unhandled error:', error)
+  logError('unhandled_error', error)
   return jsonResponse({ error: { code: 'internal_error', message: 'Errore interno del server.' } }, 500, req)
 }
 
@@ -106,10 +107,47 @@ export async function fetchWithRetry(
       }
     }
   }
-  console.error('Upstream network error:', lastError)
+  logError('upstream_network_error', lastError)
   throw errors.upstream()
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
+
+/**
+ * Safe JSON body parser with good error messages.
+ * Returns null on failure (caller decides to throw).
+ */
+export async function parseJsonBody<T = unknown>(req: Request): Promise<T | null> {
+  try {
+    const text = await req.text()
+    if (!text) return null
+    return JSON.parse(text) as T
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Common pattern helper: validates that body is a non-null object.
+ */
+export function requireObjectBody(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== 'object') {
+    throw errors.badRequest('Body JSON mancante o non valido.')
+  }
+  return body as Record<string, unknown>
+}
+
+/**
+ * Recommended pattern for new/updated Edge Functions (for maximum consistency):
+ *
+ * const logger = createRequestLogger(req);
+ * const body = await parseJsonBody(req);
+ * const { id: userId } = await requireUser(req);
+ * const admin = adminClient();
+ *
+ * logger.info('handler_start', { userId });
+ *
+ * Use AdminClient type for admin params.
+ */

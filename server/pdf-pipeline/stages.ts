@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { open, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { chunkPages } from '../../supabase/functions/_shared/chunking.ts'
+import { chunkPages, CHUNKING_VERSION as SHARED_CHUNKING_VERSION } from '../../supabase/functions/_shared/chunking.ts'
 import {
   buildStructuredOutline,
   compressLosslessPdf,
@@ -477,7 +477,7 @@ async function layoutStage(job: ClaimedPdfJob, context: StageContext): Promise<S
       processing_run_id: job.runId,
       artifact_version: job.artifactVersion,
       is_active: false,
-      chunking_version: context.config.chunkingVersion,
+      chunking_version: SHARED_CHUNKING_VERSION || context.config.chunkingVersion,
       source_text_sha256: sourceTextSha256,
     })
   }

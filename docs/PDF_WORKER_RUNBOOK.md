@@ -58,6 +58,35 @@ npx supabase db reset
 npx supabase db lint --local --level warning
 ```
 
+## Observability & Metrics (production)
+
+Il worker emette log JSON strutturati con:
+- `pdf_job_started` / `pdf_job_completed` / `pdf_job_failed`
+- `pdf_job_stage` (per ogni fase)
+- `pdf_job_metric` (duration_ms, etc.)
+- `pdf_job_lease_contention` (importante per tuning)
+
+**Correlation**: Tutti i log includono `jobId`, `runId`, `documentId`. Edge Functions passano `requestId` (usa `x-request-id` header se presente).
+
+**Lease contention monitoring**: Cerca `lease_contention` o `lost_lease`. Se frequente:
+- Aumenta `PDF_JOB_LEASE_SECONDS`
+- Riduci `PDF_WORKER_CONCURRENCY`
+- Aumenta heartbeat
+
+**Costi e qualità**: I costi AI sono registrati in `ai_cost_ledger` e `ai_monthly_usage`. Monitora `estimated_cost_usd` per job.
+
+Prima di attivare `PDF_WORKER_ENABLED=true`:
+1. Verifica che i log del worker siano collezionati (es. in Loki/CloudWatch).
+2. Fai un dry-run di riconciliazione.
+3. Fai smoke con `--once` su un documento reale.
+4. Verifica che le Edge Function usino la stessa `PDF_PIPELINE_VERSION`.
+
+Feature flag raccomandati:
+- `PDF_WORKER_ENABLED` nelle Edge Functions (blocca nuovi upload se false)
+- `VITE_DOCUMENT_UPLOAD_ENABLED` nel frontend
+
+**Runbook operativo**: Prima di cambiare versione del pipeline, drenare i job in corso o usare lo script di riconciliazione.
+
 Build container:
 
 ```bash

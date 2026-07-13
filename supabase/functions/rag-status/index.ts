@@ -4,8 +4,9 @@
 // progress (chunks_embedded / chunks_total) so the dashboard can render
 // "Ricerca intelligente: in preparazione — 42/180". Read-only, access-checked.
 
-import { preflight, jsonResponse, errorResponse, errors } from '../_shared/http.ts'
-import { requireUser, adminClient } from '../_shared/supabase.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
+import { requireUser, adminClient, type AdminClient } from '../_shared/supabase.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 type RagJobRow = {
@@ -17,16 +18,18 @@ type RagJobRow = {
   created_at: string
 }
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
+  const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
 
+  logger.info('rag_status_start')
+
   try {
     const { id: userId } = await requireUser(req)
-    const admin = adminClient()
+    const admin: AdminClient = adminClient()
 
-    const body = await req.json().catch(() => null)
+    const body = await parseJsonBody(req)
     const rawIds: string[] = Array.isArray(body?.documentIds)
       ? body.documentIds.map((value: unknown) => String(value))
       : []

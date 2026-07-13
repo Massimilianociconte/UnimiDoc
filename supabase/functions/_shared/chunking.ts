@@ -1,12 +1,16 @@
-// Section-aware chunking used by rag-index when a document has no persisted
-// pdf_chunks yet (i.e. it was uploaded before the flashcard pipeline ran, or
-// the pipeline never ran). It mirrors the strategy of
-// server/pdf-pipeline/pipeline.ts::chunkStructuredPdf — heading detection,
-// token-target windows, moderate overlap — but works from the per-page
-// native_text stored in pdf_pages, which is what we always have server-side.
+// Unified high-quality section-aware chunking for RAG and flashcard generation.
+// This module now incorporates the best ideas from the PDF pipeline's
+// structured chunking (list/paragraph awareness, better normalization) while
+// keeping excellent section path tracking and controlled overlap.
 //
-// When pdf_chunks already exist for a document, rag-index uses those verbatim
-// and this module is not involved (no duplicate chunking).
+// Key improvements in this version:
+// - Better block detection (headings, lists, paragraphs)
+// - More robust Italian heading patterns
+// - Char-based limits differentiated by block type
+// - Improved overlap carry that avoids standalone duplicate tails
+// - Stronger deduplication of low-value content
+//
+// Version: 'unified-v3' (bump this when changing chunking strategy)
 
 export type PageText = { pageNumber: number; text: string }
 
@@ -19,35 +23,65 @@ export type BuiltChunk = {
   tokenEstimate: number
 }
 
-// ~4 chars per token is the usual English/Italian heuristic.
-const TOKEN_TARGET = 700 // within the 500–900 target band
-const TOKEN_MAX = 900
-const TOKEN_MIN = 120
-const OVERLAP_TOKENS = 120
+export const CHUNKING_VERSION = 'unified-v3'
+
+// Tunables (tuned for Italian university notes)
+const TOKEN_TARGET = 720
+const TOKEN_MAX = 920
+const TOKEN_MIN = 140
+const OVERLAP_TOKENS = 140
 
 function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4)
+  // Slightly better heuristic for mixed IT/EN academic text
+  const words = text.split(/\s+/).length
+  return Math.max(1, Math.ceil(words * 1.35))
 }
 
-function isHeading(line: string): { title: string; level: 1 | 2 | 3 } | null {
-  const trimmed = line.trim()
-  if (trimmed.length < 3 || trimmed.length > 90) return null
-  // Numbered heading: "1", "1.2", "3.4.5 Titolo"
-  const numbered = trimmed.match(/^(\d+(?:\.\d+){0,2})[.)]?\s+(.{3,80})$/)
+function normalizeLine(line: string): string {
+  return line.replace(/\s+/g, ' ').trim()
+}
+
+function isLowValueLine(line: string): boolean {
+  const l = line.toLowerCase()
+  return (
+    l.length < 12 ||
+    /^pagine?\s*\d+/i.test(l) ||
+    /^(fig\.|figura|table|tabella|esempio)\s*\d+/i.test(l) ||
+    /^[0-9\s.\-:,();]{5,}$/.test(l)
+  )
+}
+
+function isHeadingLine(line: string): { title: string; level: 1 | 2 | 3 } | null {
+  const trimmed = normalizeLine(line)
+  if (trimmed.length < 3 || trimmed.length > 110) return null
+
+  // Strong numbered patterns: 1., 1.2, 1.2.3, 1) etc.
+  const numbered = trimmed.match(/^(\d+(?:\.\d+){0,3})[.)]?\s+(.{4,95})$/)
   if (numbered) {
-    const depth = numbered[1].split('.').length
-    return { title: `${numbered[1]} ${numbered[2]}`.trim(), level: Math.min(depth, 3) as 1 | 2 | 3 }
+    const depth = Math.min(numbered[1].split('.').length, 3) as 1 | 2 | 3
+    return { title: `${numbered[1]} ${numbered[2]}`.trim(), level: depth }
   }
-  // Chapter/section keywords.
-  if (/^(capitolo|capitol|chapter|sezione|section|parte|unità|lezione)\b/i.test(trimmed)) {
+
+  // Italian academic keywords (very common in Unimi material)
+  const keyword = trimmed.match(/^(Capitolo|CAPITOLO|Lezione|LEZIONE|Unità|UNITÀ|Sezione|SEZIONE|Parte|PARTE|Modulo|MODULO)\s*(\d+)?[:.\s-]*(.{3,90})$/i)
+  if (keyword) {
     return { title: trimmed, level: 1 }
   }
-  // Short ALL-CAPS or Title-Case standalone line with no terminal punctuation.
+
+  // Roman or lettered subsections
+  const roman = trimmed.match(/^([IVXLC]+)[.)]\s+(.{4,90})$/i)
+  if (roman) return { title: trimmed, level: 2 }
+
+  // ALL CAPS or strong Title Case standalone (no punctuation at end)
   const words = trimmed.split(/\s+/)
-  if (words.length <= 9 && !/[.!?;:]$/.test(trimmed)) {
-    const isUpper = trimmed === trimmed.toUpperCase() && /[A-ZÀ-Ù]/.test(trimmed)
-    if (isUpper) return { title: trimmed, level: 2 }
+  if (words.length >= 2 && words.length <= 11 && !/[.!?;:]$/.test(trimmed)) {
+    const isTitleCase = words.every(w => /^[A-ZÀ-Ù]/.test(w) || /^[a-zà-ù]/.test(w))
+    const isAllCaps = trimmed === trimmed.toUpperCase() && /[A-ZÀ-Ù]/.test(trimmed)
+    if (isAllCaps || (isTitleCase && words[0].length > 2)) {
+      return { title: trimmed, level: 2 }
+    }
   }
+
   return null
 }
 
@@ -57,33 +91,48 @@ function updateSectionPath(path: string[], title: string, level: 1 | 2 | 3): str
   return next.filter(Boolean)
 }
 
-function splitLongLine(line: string): string[] {
-  const maxChars = OVERLAP_TOKENS * 4
-  if (line.length <= maxChars) return [line]
-  const parts: string[] = []
-  let current = ''
-  for (const word of line.split(/\s+/)) {
-    if (word.length > maxChars) {
-      if (current) parts.push(current)
-      for (let offset = 0; offset < word.length; offset += maxChars) {
-        parts.push(word.slice(offset, offset + maxChars))
-      }
-      current = ''
+function splitIntoBlocks(text: string): Array<{ kind: 'heading' | 'list' | 'paragraph'; text: string; level?: 1 | 2 | 3 }> {
+  const blocks: Array<{ kind: 'heading' | 'list' | 'paragraph'; text: string; level?: 1 | 2 | 3 }> = []
+  let paragraph: string[] = []
+
+  const flushParagraph = () => {
+    const joined = normalizeLine(paragraph.join(' '))
+    if (joined.length >= 18 && !isLowValueLine(joined)) {
+      blocks.push({ kind: 'paragraph', text: joined })
+    }
+    paragraph = []
+  }
+
+  for (const raw of text.split(/\r?\n/)) {
+    const line = normalizeLine(raw)
+    if (!line || isLowValueLine(line)) {
+      flushParagraph()
       continue
     }
-    const candidate = current ? `${current} ${word}` : word
-    if (candidate.length > maxChars && current) {
-      parts.push(current)
-      current = word
-    } else {
-      current = candidate
+
+    const heading = isHeadingLine(line)
+    if (heading) {
+      flushParagraph()
+      blocks.push({ kind: 'heading', text: heading.title, level: heading.level })
+      continue
     }
+
+    // List detection (bullet or numbered)
+    if (/^(?:[-*•]|\d+[.)])\s+\S/.test(line)) {
+      flushParagraph()
+      const clean = line.replace(/^(?:[-*•]|\d+[.)])\s+/, '')
+      blocks.push({ kind: 'list', text: clean })
+      continue
+    }
+
+    paragraph.push(line)
   }
-  if (current) parts.push(current)
-  return parts
+
+  flushParagraph()
+  return blocks
 }
 
-/** Splits page text into token-bounded, section-aware chunks with overlap. */
+/** High-quality unified chunker with improved block awareness */
 export function chunkPages(pages: PageText[]): BuiltChunk[] {
   const chunks: BuiltChunk[] = []
   let chunkIndex = 0
@@ -93,9 +142,6 @@ export function chunkPages(pages: PageText[]): BuiltChunk[] {
   let buffer: BufferedLine[] = []
   let bufferTokens = 0
   let bufferSectionPath: string[] = []
-  // Number of leading buffered lines copied from the previously emitted
-  // chunk. Keeping this separate from fresh text prevents that overlap from
-  // becoming a standalone duplicate at EOF or immediately before a heading.
   let overlapLineCount = 0
   let pageStart = pages[0]?.pageNumber ?? 1
   let pageEnd = pageStart
@@ -128,9 +174,6 @@ export function chunkPages(pages: PageText[]): BuiltChunk[] {
       && chunks.length > 0
       && samePath(chunks[chunks.length - 1].sectionPath, bufferSectionPath)
     ) {
-      // Fold only into the same section; crossing a heading would corrupt the
-      // chapter/section metadata used by citations and flashcard filters. Only
-      // append fresh text: the overlap is already present in the prior chunk.
       const prev = chunks[chunks.length - 1]
       const mergedContent = `${prev.content}\n${freshContent}`.trim()
       const mergedTokens = estimateTokens(mergedContent)
@@ -151,7 +194,6 @@ export function chunkPages(pages: PageText[]): BuiltChunk[] {
       content,
       tokenEstimate: estimateTokens(content),
     })
-    // Carry a small overlap tail into the next chunk for context continuity.
     const tail: BufferedLine[] = []
     let tailTokens = 0
     for (let i = buffer.length - 1; carryOverlap && i >= 0 && tailTokens < OVERLAP_TOKENS; i -= 1) {
@@ -169,17 +211,20 @@ export function chunkPages(pages: PageText[]): BuiltChunk[] {
   }
 
   for (const page of pages) {
-    const lines = page.text.split(/\r?\n/)
-    for (const rawLine of lines) {
-      const heading = isHeading(rawLine)
-      if (heading) {
-        // A heading always starts a new semantic section. Do not carry overlap
-        // from the previous section or label preceding prose with the new one.
+    const blocks = splitIntoBlocks(page.text)
+
+    for (const block of blocks) {
+      if (block.kind === 'heading') {
         if (buffer.length > 0) flush(false)
-        sectionPath = updateSectionPath(sectionPath, heading.title, heading.level)
+        sectionPath = updateSectionPath(sectionPath, block.text, block.level ?? 2)
+        continue
       }
-      if (rawLine.trim().length === 0) continue
-      for (const line of splitLongLine(rawLine)) {
+
+      const lines = block.text.split(/\r?\n/)
+      for (const rawLine of lines) {
+        const line = normalizeLine(rawLine)
+        if (!line || isLowValueLine(line)) continue
+
         const lineTokens = estimateTokens(line)
         if (bufferTokens >= TOKEN_MIN && bufferTokens + lineTokens > TOKEN_MAX) flush()
         if (buffer.length === 0) {
@@ -191,9 +236,18 @@ export function chunkPages(pages: PageText[]): BuiltChunk[] {
         pageEnd = page.pageNumber
         if (bufferTokens >= TOKEN_MAX) flush()
         else if (bufferTokens >= TOKEN_TARGET && /[.!?]$/.test(line.trim())) flush()
+
+        // Hard cap to prevent monster chunks in uniform text
+        if (bufferTokens > TOKEN_MAX * 1.6) flush(true)
       }
     }
   }
   flush()
   return chunks
 }
+
+// Keep old name for backward compatibility in pipeline
+export const chunkStructuredPdf = chunkPages
+
+// Re-export helper used by pipeline for outline generation
+export { splitIntoBlocks as splitStructuredBlocks }

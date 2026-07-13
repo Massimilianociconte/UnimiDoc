@@ -1,9 +1,10 @@
 // Stripe Accounts v2 recipient onboarding. UnimiDoc remains merchant of record
 // for top-ups; sellers receive later transfers through the recipient capability.
 
-import { preflight, jsonResponse, errorResponse, errors } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
 import { adminClient, requireUser } from '../_shared/supabase.ts'
 import { billingReturnUrl, requireBillingRuntime, stripeRequest } from '../_shared/billing.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 
 type ConnectContext = {
   connected_account_id: string
@@ -34,16 +35,18 @@ function capabilityStatus(value: unknown): 'pending' | 'active' | 'restricted' |
   return value === 'active' || value === 'restricted' || value === 'unsupported' ? value : 'pending'
 }
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
+  const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
   if (req.method !== 'POST') return jsonResponse({ error: { code: 'method_not_allowed' } }, 405, req)
 
+  logger.info('connect_onboarding_start')
+
   try {
     const runtime = requireBillingRuntime('connect')
     const { id: userId } = await requireUser(req)
-    const body = await req.json().catch(() => null)
+    const body = await parseJsonBody(req)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
     const acceptedConnectTermsVersion = String(body.acceptedConnectTermsVersion ?? '').trim()
     if (acceptedConnectTermsVersion !== runtime.connectTermsVersion) {

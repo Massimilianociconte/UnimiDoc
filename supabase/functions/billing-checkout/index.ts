@@ -1,9 +1,10 @@
 // Authenticated Stripe-hosted Checkout. Offer, amount, Price ID and redirect
 // origins are server authoritative; requestId drives end-to-end idempotency.
 
-import { preflight, jsonResponse, errorResponse, errors, AppError } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody } from '../_shared/http.ts'
 import { adminClient, requireUser } from '../_shared/supabase.ts'
 import { billingReturnUrl, requireBillingRuntime, stripeRequest, unixSecondsToIso } from '../_shared/billing.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 
 type PreparedCheckout = {
   checkout_request_id: string
@@ -23,16 +24,18 @@ type StripeCheckoutSession = { id: string; url: string | null; expires_at: numbe
 const REQUEST_RE = /^[a-zA-Z0-9:_-]{16,160}$/
 const OFFER_RE = /^[a-z0-9][a-z0-9_-]{1,63}$/
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
+  const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
   if (req.method !== 'POST') return jsonResponse({ error: { code: 'method_not_allowed' } }, 405, req)
 
+  logger.info('billing_checkout_start')
+
   try {
     const runtime = requireBillingRuntime('checkout')
     const { id: userId } = await requireUser(req)
-    const body = await req.json().catch(() => null)
+    const body = await parseJsonBody(req)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
 
     const offerKey = String(body.offerKey ?? '').trim()

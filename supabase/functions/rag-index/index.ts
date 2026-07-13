@@ -15,7 +15,7 @@
 // workflow) may mutate the shared index. Buyers query the existing embeddings
 // through match_rag_chunks but can never rebuild somebody else's document.
 
-import { preflight, jsonResponse, errorResponse, errors, AppError } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody } from '../_shared/http.ts'
 import { config } from '../_shared/env.ts'
 import {
   adminClient,
@@ -24,9 +24,10 @@ import {
   enforceRateLimit,
   recordUsage,
   sha256Hex,
+  type AdminClient,
 } from '../_shared/supabase.ts'
 import { getEmbeddingProvider } from '../_shared/embeddings.ts'
-import { chunkPages } from '../_shared/chunking.ts'
+import { chunkPages, CHUNKING_VERSION } from '../_shared/chunking.ts'
 
 // Cost guard: max chunks embedded per document, by the *requester's* plan.
 const CHUNK_CAP: Record<string, number> = { free: 120, base: 300, premium: 800 }
@@ -46,8 +47,7 @@ type DbChunk = {
 // Human-reviewed cards may be saved as soon as upload finalize succeeds, before
 // the worker has produced authoritative chunks. Preserve their page provenance
 // at save time, then attach the canonical chunk/outline here once it exists.
-// deno-lint-ignore no-explicit-any
-async function linkReviewedFlashcards(admin: any, documentId: string, chunks: DbChunk[]): Promise<number> {
+async function linkReviewedFlashcards(admin: AdminClient, documentId: string, chunks: DbChunk[]): Promise<number> {
   if (chunks.length === 0) return 0
   const { data: cards, error } = await admin
     .from('flashcards')
@@ -101,7 +101,7 @@ async function isTrustedPdfWorker(req: Request): Promise<boolean> {
   let jobId: string | null = null
   let activeDocumentId: string | null = null
   try {
-    const body = await req.json().catch(() => null)
+    const body = await parseJsonBody(req)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
     const documentId = String(body.documentId ?? '')
     if (!documentId) throw errors.badRequest('documentId obbligatorio.')
@@ -259,7 +259,7 @@ async function isTrustedPdfWorker(req: Request): Promise<boolean> {
           processing_state: 'ready',
           artifact_version: 'rag-index-legacy',
           is_active: true,
-          chunking_version: 'section-aware-v2',
+          chunking_version: CHUNKING_VERSION,
         })),
       )
       const { error: insErr } = await admin
@@ -431,8 +431,7 @@ async function isTrustedPdfWorker(req: Request): Promise<boolean> {
   }
 })
 
-// deno-lint-ignore no-explicit-any
-async function finishJob(admin: any, jobId: string | null, documentId: string, status: string, total: number, embedded: number, provider: { embeddingVersion: string }, message: string | null) {
+async function finishJob(admin: AdminClient, jobId: string | null, documentId: string, status: string, total: number, embedded: number, provider: { embeddingVersion: string }, message: string | null) {
   const docStatus = status === 'completed' ? 'indexed' : status === 'partial' ? 'partial' : status === 'failed' ? 'failed' : 'processing'
   if (jobId) {
     const { error: jobError } = await admin

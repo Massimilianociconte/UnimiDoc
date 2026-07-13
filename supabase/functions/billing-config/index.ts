@@ -3,6 +3,7 @@
 
 import { preflight, jsonResponse, errorResponse } from '../_shared/http.ts'
 import { adminClient } from '../_shared/supabase.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 import { billingReadiness } from '../_shared/billing.ts'
 
 type DbOffer = {
@@ -17,11 +18,15 @@ type DbOffer = {
   interval: 'month' | 'year' | null
 }
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
+  const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
   if (!['GET', 'POST'].includes(req.method)) return jsonResponse({ error: { code: 'method_not_allowed' } }, 405, req)
+
+  logger.info('billing_config_served')
+
+  if (req.method === 'POST') await parseJsonBody(req) // for future use or validation
 
   try {
     const readiness = billingReadiness('config')

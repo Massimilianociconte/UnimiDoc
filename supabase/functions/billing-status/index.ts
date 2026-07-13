@@ -1,8 +1,9 @@
 // Authenticated, ownership-scoped projection for checkout, subscription, wallet,
 // Connect and the latest payout. It remains available during Stripe outages.
 
-import { preflight, jsonResponse, errorResponse, errors } from '../_shared/http.ts'
-import { adminClient, requireUser } from '../_shared/supabase.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
+import { adminClient, requireUser, type AdminClient } from '../_shared/supabase.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -47,19 +48,21 @@ type BillingStatus = {
   payout?: unknown
 }
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
+  const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
   if (req.method !== 'POST') return jsonResponse({ error: { code: 'method_not_allowed' } }, 405, req)
 
+  logger.info('billing_status_start')
+
   try {
     const { id: userId } = await requireUser(req)
-    const body = await req.json().catch(() => ({}))
+    const body = await parseJsonBody(req) ?? {}
     const checkoutRequestId = String(body?.checkoutRequestId ?? '').trim()
     if (checkoutRequestId && !UUID_RE.test(checkoutRequestId)) throw errors.badRequest('checkoutRequestId non valido.')
 
-    const admin = adminClient()
+    const admin: AdminClient = adminClient()
     const { data, error } = await admin.rpc('billing_get_status', {
       p_owner: userId,
       p_checkout_request: checkoutRequestId || null,

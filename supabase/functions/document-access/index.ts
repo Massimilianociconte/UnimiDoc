@@ -5,8 +5,9 @@
 // document's preview_policy permits download. A non-entitled viewer receives
 // exclusively the free, watermarked preview pages — never the original bytes.
 
-import { preflight, jsonResponse, errorResponse, errors, AppError } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody } from '../_shared/http.ts'
 import { adminClient, requireUser, getEntitlement } from '../_shared/supabase.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 
 const SIGNED_TTL_SECONDS = 60
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -32,16 +33,18 @@ type PreviewRow = {
   is_free_preview: boolean
 }
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
+  const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
+
+  logger.info('document_access_start')
 
   try {
     const { id: userId } = await requireUser(req)
     const admin = adminClient()
 
-    const body = await req.json().catch(() => null)
+    const body = await parseJsonBody(req)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
     const documentId = String(body.documentId ?? '')
     if (!UUID_RE.test(documentId)) throw errors.badRequest('documentId non valido.')

@@ -3,9 +3,10 @@
 // the server. Available to all authenticated users (SRS is a free feature).
 // Persists per-user, per-card SRS state + an answer-telemetry row.
 
-import { preflight, jsonResponse, errorResponse, errors } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
 import { requireUser } from '../_shared/supabase.ts'
 import { calculateNextReview, type SrsRating, type AnswerStatus, type SrsState } from '../_shared/srs.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 
 const RATINGS: SrsRating[] = ['impossible', 'hard', 'ok', 'easy']
 const STATUSES: AnswerStatus[] = ['correct', 'incorrect', 'partial', 'unknown', 'skipped']
@@ -18,15 +19,17 @@ function clampInt(value: unknown, max: number, fallback: number | null): number 
   return Math.max(0, Math.min(max, Math.round(n)))
 }
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
   const pre = preflight(req)
   if (pre) return pre
 
+  const logger = createRequestLogger(req)
+  logger.info('srs_review_started')
+
   try {
     const { id: userId, supabase } = await requireUser(req)
 
-    const body = await req.json().catch(() => null)
+    const body = await parseJsonBody(req)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
     const flashcardId = String(body.flashcardId ?? '')
     const rating = body.rating as SrsRating

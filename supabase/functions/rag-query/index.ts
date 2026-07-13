@@ -6,7 +6,7 @@
 // asks the LLM to answer USING ONLY those chunks and returns structured
 // citations. The model never sees the whole document — only retrieved chunks.
 
-import { preflight, jsonResponse, errorResponse, errors } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
 import { config } from '../_shared/env.ts'
 import {
   requireUser,
@@ -18,6 +18,7 @@ import {
 } from '../_shared/supabase.ts'
 import { getEmbeddingProvider } from '../_shared/embeddings.ts'
 import { deepseekChat, deepseekCost } from '../_shared/ai.ts'
+import { logError, createRequestLogger } from '../_shared/log.ts'
 
 const SYSTEM_PROMPT = `Sei l'assistente di studio di UnimiDoc.
 Rispondi alla domanda usando ESCLUSIVAMENTE il contesto fornito qui sotto.
@@ -32,8 +33,8 @@ Niente tabelle complesse e niente blocchi di codice.
 Mantieni una spiegazione chiara, didattica e adatta a uno studente universitario. Rispondi in italiano.`
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-const MAX_CONTEXT_CHARS = 14_000
-const MIN_TOP_SIMILARITY = 0.2
+const MAX_CONTEXT_CHARS = config.rag.maxContextChars
+const MIN_TOP_SIMILARITY = config.rag.minSimilarity
 
 type Match = {
   chunk_id: string
@@ -59,28 +60,73 @@ function lexicalOverlap(left: string, right: string): number {
   return intersection / Math.max(1, a.size + b.size - intersection)
 }
 
+/**
+ * High-quality re-ranking + selection.
+ * 1. Uses the hybrid rank_score when available.
+ * 2. Applies MMR (Maximal Marginal Relevance) for diversity.
+ * 3. Stronger deduplication.
+ * 4. Respects context budget while preserving best citations.
+ */
 function selectPromptMatches(matches: Match[]): Match[] {
-  const topSimilarity = matches[0]?.similarity ?? 0
-  if (topSimilarity < MIN_TOP_SIMILARITY) return []
+  if (matches.length === 0) return []
 
-  // Keep results close enough to the best match, then enforce a hard prompt
-  // budget. This avoids sending weak tail matches or an entire document to the
-  // answer model while preserving the original similarity order/citations.
-  const threshold = Math.max(MIN_TOP_SIMILARITY, topSimilarity - 0.2)
-  const selected: Match[] = []
-  let used = 0
-  for (const match of matches) {
-    if (match.similarity < threshold) continue
-    if (selected.some((existing) =>
-      existing.document_id === match.document_id
-      && lexicalOverlap(existing.content, match.content) >= 0.86
-    )) continue
-    const chars = Math.min(match.content.length, 5000)
-    if (selected.length > 0 && used + chars > MAX_CONTEXT_CHARS) break
-    selected.push(match)
-    used += chars
+  // Normalize score (prefer rank_score from hybrid if present)
+  const scored = matches.map(m => ({
+    ...m,
+    score: (m as any).rank_score ?? m.similarity
+  })).sort((a, b) => b.score - a.score)
+
+  const topScore = scored[0].score
+  if (topScore < MIN_TOP_SIMILARITY) return []
+
+  const lambda = config.rag.mmrLambda // MMR trade-off (higher = more relevance, lower = more diversity)
+  const selected: any[] = []
+  const usedChars = 0
+
+  const candidates = [...scored]
+
+  while (candidates.length > 0 && selected.length < 12) {
+    let bestIdx = -1
+    let bestMMR = -Infinity
+
+    for (let i = 0; i < candidates.length; i++) {
+      const cand = candidates[i]
+      const chars = Math.min(cand.content.length, 4800)
+
+      // Skip if would exceed budget
+      if (usedChars + chars > MAX_CONTEXT_CHARS && selected.length > 0) continue
+
+      // MMR calculation
+      let maxSimToSelected = 0
+      for (const sel of selected) {
+        const sim = lexicalOverlap(cand.content, sel.content)
+        if (sim > maxSimToSelected) maxSimToSelected = sim
+      }
+
+      const mmr = lambda * cand.score - (1 - lambda) * maxSimToSelected
+
+      if (mmr > bestMMR) {
+        bestMMR = mmr
+        bestIdx = i
+      }
+    }
+
+    if (bestIdx === -1) break
+
+    const chosen = candidates.splice(bestIdx, 1)[0]
+
+    // Final strong dedup against already selected
+    const isDuplicate = selected.some((sel: any) =>
+      sel.document_id === chosen.document_id &&
+      lexicalOverlap(sel.content, chosen.content) >= 0.82
+    )
+    if (isDuplicate) continue
+
+    selected.push(chosen)
   }
-  return selected
+
+  // Return in original relevance order for good citations
+  return selected.sort((a, b) => b.score - a.score)
 }
 
 // deno-lint-ignore no-explicit-any
@@ -88,14 +134,18 @@ function selectPromptMatches(matches: Match[]): Match[] {
   const pre = preflight(req)
   if (pre) return pre
 
+  const logger = createRequestLogger(req)
+
   try {
     const { id: userId } = await requireUser(req)
     const admin = adminClient()
     const scoped = userClient(req) // carries the caller JWT -> auth.uid() in the RPC
 
+    logger.info('rag_query_start')
+
     // Validate the payload BEFORE spending rate-limit quota or DB roundtrips:
     // a malformed request must never consume the user's monthly budget.
-    const body = await req.json().catch(() => null)
+    const body = await parseJsonBody(req)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
     const query = String(body.query ?? '').trim()
     if (!query) throw errors.badRequest('query obbligatoria.')
@@ -121,16 +171,26 @@ function selectPromptMatches(matches: Match[]): Match[] {
     const queryVector = await provider.embedText(query, 'query')
 
     // 2) Access-safe retrieval via the SECURITY DEFINER RPC (user-scoped client).
+    // Ask for higher recall for re-ranking stage
+    const recallK = Math.min(config.rag.recallK, matchCount * 4)
     const { data: matchesRaw, error: matchError } = await scoped.rpc('match_rag_chunks', {
       query_embedding: JSON.stringify(queryVector),
       p_embedding_model: provider.embeddingModelId,
       p_embedding_version: provider.embeddingVersion,
-      match_count: matchCount,
+      match_count: recallK,
       filter_document_ids: documentIds,
-      min_similarity: 0.18,
+      min_similarity: config.rag.minSimilarity,
+      query_text: query,
+      hybrid_alpha: config.rag.hybridAlpha,
     })
     if (matchError) throw errors.badRequest(`Ricerca non riuscita: ${matchError.message}`)
     const matches = selectPromptMatches((matchesRaw ?? []) as Match[])
+
+    logger.info('rag_retrieval_quality', {
+      retrieved: matchesRaw?.length ?? 0,
+      selected: matches.length,
+      topScore: matches[0]?.similarity ?? matches[0]?.rank_score,
+    })
 
     if (matches.length === 0) {
       await recordUsage(admin, {
@@ -228,7 +288,7 @@ function selectPromptMatches(matches: Match[]): Match[] {
 })
 
 // deno-lint-ignore no-explicit-any
-async function logQuery(admin: any, userId: string, query: string, documentIds: string[], chunkIds: string[], topSim: number | null, model: string | null) {
+async function logQuery(admin: AdminClient, userId: string, query: string, documentIds: string[], chunkIds: string[], topSim: number | null, model: string | null) {
   const { error } = await admin.from('rag_query_logs').insert({
     user_id: userId,
     query: query.slice(0, 2000),
@@ -238,5 +298,5 @@ async function logQuery(admin: any, userId: string, query: string, documentIds: 
     top_similarity: topSim,
     model_used: model,
   })
-  if (error) console.error('rag_query_logs insert failed:', error.message)
+  if (error) logError('rag_query_logs_insert_failed', error)
 }

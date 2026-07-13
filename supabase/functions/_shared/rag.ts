@@ -7,6 +7,8 @@
 
 import { userClient } from './supabase.ts'
 import { getEmbeddingProvider } from './embeddings.ts'
+import { logError } from './log.ts'
+import { config } from './env.ts'
 
 export type RagMatch = {
   chunk_id: string
@@ -40,27 +42,36 @@ export async function retrieveRagMatches(
       p_embedding_version: provider.embeddingVersion,
       match_count: Math.max(1, Math.min(params.matchCount ?? 4, 12)),
       filter_document_ids: params.documentIds ?? null,
-      min_similarity: params.minSimilarity ?? 0.2,
+      min_similarity: params.minSimilarity ?? config.rag.minSimilarity,
+      query_text: query.slice(0, 1500),   // enable hybrid
+      hybrid_alpha: config.rag.hybridAlpha,
     })
     if (error) {
-      console.error('retrieveRagMatches rpc failed:', error.message)
+      logError('retrieveRagMatches_rpc_failed', error)
       return null
     }
-    return (data ?? []) as RagMatch[]
+    const raw = (data ?? []) as any[]
+    return raw.map(r => ({
+      ...r,
+      similarity: r.rank_score ?? r.similarity
+    })) as RagMatch[]
   } catch (error) {
-    console.error('retrieveRagMatches failed:', error instanceof Error ? error.message : error)
+    logError('retrieveRagMatches_failed', error)
     return null
   }
 }
 
-/** Formats matches as a compact plain-text block for prompt injection. */
-export function formatRagContext(matches: RagMatch[], maxChars = 5500): string {
+/** Formats matches as a compact plain-text block for prompt injection.
+ *  Now prefers rank_score when hybrid retrieval was used.
+ */
+export function formatRagContext(matches: RagMatch[], maxChars = config.rag.maxContextChars): string {
   const parts: string[] = []
   let used = 0
   for (const [i, m] of matches.entries()) {
     const pages = m.page_start === m.page_end ? `p. ${m.page_start}` : `pp. ${m.page_start}-${m.page_end}`
     const section = m.section_path?.length ? ` · ${m.section_path.join(' > ')}` : ''
-    const block = `[${i + 1}] (${pages}${section})\n${m.content}`
+    const score = (m as any).rank_score ? ((m as any).rank_score * 100).toFixed(1) + '%' : ''
+    const block = `[#${i + 1}] (${pages}${section})${score ? ' ' + score : ''}\n${m.content}`
     if (used + block.length > maxChars) break
     parts.push(block)
     used += block.length

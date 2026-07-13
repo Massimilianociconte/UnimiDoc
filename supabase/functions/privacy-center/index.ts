@@ -2,13 +2,13 @@
 // erasure requests. No browser endpoint directly deletes an account or any
 // financial record; a verified worker applies retention/pseudonymisation rules.
 
-import { preflight, jsonResponse, errorResponse, errors } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
 import { adminClient, requireUser, sha256Hex } from '../_shared/supabase.ts'
 
 const MAX_ROWS_PER_DATASET = 10_000
 
 // deno-lint-ignore no-explicit-any
-async function readOwned(admin: any, table: string, ownerColumn: string, userId: string, columns = '*') {
+async function readOwned(admin: AdminClient, table: string, ownerColumn: string, userId: string, columns = '*') {
   const { data, error, count } = await admin
     .from(table)
     .select(columns, { count: 'exact' })
@@ -23,14 +23,14 @@ async function readOwned(admin: any, table: string, ownerColumn: string, userId:
 }
 
 // deno-lint-ignore no-explicit-any
-async function readBillingExport(admin: any, userId: string) {
+async function readBillingExport(admin: AdminClient, userId: string) {
   const { data, error } = await admin.rpc('billing_privacy_export', { p_owner: userId })
   if (error) return { rows: {}, count: 0, unavailable: true }
   return { rows: data ?? {}, count: 1, truncated: false }
 }
 
 // deno-lint-ignore no-explicit-any
-async function readAuthProfile(admin: any, userId: string) {
+async function readAuthProfile(admin: AdminClient, userId: string) {
   const { data, error } = await admin.auth.admin.getUserById(userId)
   if (error || !data.user) return { rows: [], count: 0, unavailable: true }
   const user = data.user
@@ -56,7 +56,7 @@ async function readAuthProfile(admin: any, userId: string) {
 }
 
 // deno-lint-ignore no-explicit-any
-async function buildExport(admin: any, userId: string) {
+async function buildExport(admin: AdminClient, userId: string) {
   const datasets = await Promise.all([
     readAuthProfile(admin, userId),
     readOwned(admin, 'profiles', 'id', userId, 'id, full_name, email, avatar_url, public_display_name, seller_profile_enabled, created_at, updated_at'),
@@ -217,7 +217,7 @@ async function cancelErasure(admin: any, userId: string, requestId: string, req:
   try {
     const { id: userId } = await requireUser(req)
     const admin = adminClient()
-    const body = await req.json().catch(() => ({})) as { action?: string; requestId?: string }
+    const body = await parseJsonBody(req) as { action?: string; requestId?: string } || {}
     const action = String(body.action ?? 'status')
 
     if (action === 'export') {

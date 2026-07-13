@@ -4,7 +4,7 @@
 // token usage + estimated cost. Never called by free users.
 
 import { config } from '../_shared/env.ts'
-import { preflight, jsonResponse, errorResponse, errors } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
 import {
   adminClient,
   requireUser,
@@ -19,6 +19,7 @@ import {
 import { deepseekChat, deepseekCost } from '../_shared/ai.ts'
 import { buildAiHelpPrompt, type AiHelpMode } from '../_shared/prompts.ts'
 import { retrieveRagMatches, formatRagContext } from '../_shared/rag.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 
 const MODES: AiHelpMode[] = ['explain', 'followup', 'example', 'memo', 'visualize']
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -31,17 +32,18 @@ const PROMPT_VERSION: Record<AiHelpMode, string> = {
   visualize: config.promptVersions.visualize,
 }
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
   const pre = preflight(req)
   if (pre) return pre
 
+  const logger = createRequestLogger(req)
+  logger.info('ai_help_started')
   try {
     const { id: userId } = await requireUser(req)
     const admin = adminClient()
     await requirePremium(admin, userId)
 
-    const body = await req.json().catch(() => null)
+    const body = await parseJsonBody(req)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
 
     const mode = body.mode as AiHelpMode

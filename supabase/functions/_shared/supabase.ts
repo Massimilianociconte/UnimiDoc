@@ -1,9 +1,15 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
 import { config } from './env.ts'
 import { errors } from './http.ts'
+import { logError } from './log.ts'
+
+/** Strongly typed alias for the privileged admin client (bypasses RLS). */
+export type AdminClient = SupabaseClient
+/** Strongly typed alias for a user-scoped client (subject to RLS). */
+export type UserClient = SupabaseClient
 
 /** Service-role client — bypasses RLS. Use ONLY server-side for privileged writes. */
-export function adminClient(): SupabaseClient {
+export function adminClient(): AdminClient {
   return createClient(config.supabaseUrl, config.serviceRoleKey, { auth: { persistSession: false } })
 }
 
@@ -33,7 +39,7 @@ export type Entitlement = {
   plan: string
 }
 
-export async function getEntitlement(admin: SupabaseClient, userId: string): Promise<Entitlement> {
+export async function getEntitlement(admin: AdminClient, userId: string): Promise<Entitlement> {
   const { data } = await admin
     .from('user_entitlements')
     .select('plan, premium_until, ai_flashcards_enabled')
@@ -47,14 +53,14 @@ export async function getEntitlement(admin: SupabaseClient, userId: string): Pro
 }
 
 /** Throws a 402 paywall unless the user has an active Premium plan. */
-export async function requirePremium(admin: SupabaseClient, userId: string): Promise<Entitlement> {
+export async function requirePremium(admin: AdminClient, userId: string): Promise<Entitlement> {
   const entitlement = await getEntitlement(admin, userId)
   if (!entitlement.isPremium) throw errors.paywall()
   return entitlement
 }
 
 /** Allows Premium users and explicit flashcard-only feature grants. */
-export async function requireAiFlashcards(admin: SupabaseClient, userId: string): Promise<Entitlement> {
+export async function requireAiFlashcards(admin: AdminClient, userId: string): Promise<Entitlement> {
   const entitlement = await getEntitlement(admin, userId)
   if (!entitlement.canUseAiFlashcards) {
     throw errors.paywall('Generazione AI delle flashcard non abilitata per questo account.')
@@ -64,7 +70,7 @@ export async function requireAiFlashcards(admin: SupabaseClient, userId: string)
 
 /** Per-minute + per-month rate limiting via the ai_cost_ledger. */
 export async function enforceRateLimit(
-  admin: SupabaseClient,
+  admin: AdminClient,
   userId: string,
   feature: string,
   monthlyLimit: number,
@@ -110,7 +116,7 @@ export type UsageRow = {
   estimated_cost_usd: number
 }
 
-export async function recordUsage(admin: SupabaseClient, row: UsageRow): Promise<void> {
+export async function recordUsage(admin: AdminClient, row: UsageRow): Promise<void> {
   const inputTokens = row.cache_miss_tokens ?? row.input_tokens ?? 0
   const cachedTokens = row.cache_hit_tokens ?? 0
   const outputTokens = row.output_tokens ?? 0
@@ -126,7 +132,7 @@ export async function recordUsage(admin: SupabaseClient, row: UsageRow): Promise
     output_tokens: outputTokens,
     estimated_cost_usd: row.estimated_cost_usd,
   })
-  if (error) console.error('recordUsage failed:', error.message)
+  if (error) logError('recordUsage_failed', error)
 
   // Best-effort monthly rollup (atomic via RPC) — never fails the request.
   const { error: rpcError } = await admin.rpc('record_ai_monthly_usage', {
@@ -136,11 +142,11 @@ export async function recordUsage(admin: SupabaseClient, row: UsageRow): Promise
     p_output: outputTokens,
     p_cost: row.estimated_cost_usd,
   })
-  if (rpcError) console.error('record_ai_monthly_usage failed:', rpcError.message)
+  if (rpcError) logError('record_ai_monthly_usage_failed', rpcError)
 }
 
 // deno-lint-ignore no-explicit-any
-export async function recordAiHelp(admin: SupabaseClient, row: Record<string, any>): Promise<void> {
+export async function recordAiHelp(admin: AdminClient, row: Record<string, unknown>): Promise<void> {
   const { error } = await admin.from('ai_helps').insert({
     owner_id: row.user_id,
     flashcard_id: row.flashcard_id ?? null,
@@ -154,7 +160,7 @@ export async function recordAiHelp(admin: SupabaseClient, row: Record<string, an
     output_tokens: row.output_tokens ?? 0,
     estimated_cost_usd: row.estimated_cost_usd ?? 0,
   })
-  if (error) console.error('recordAiHelp failed:', error.message)
+  if (error) logError('recordAiHelp_failed', error)
 }
 
 // --------------------------------------------------------------------------
@@ -169,13 +175,13 @@ export async function cacheKey(parts: (string | number | null | undefined)[]): P
   return sha256Hex(parts.map((part) => String(part ?? '')).join('|'))
 }
 
-export async function getCached(admin: SupabaseClient, key: string): Promise<unknown | null> {
+export async function getCached(admin: AdminClient, key: string): Promise<unknown | null> {
   const { data } = await admin.from('ai_cache').select('output').eq('cache_key', key).maybeSingle()
   return data?.output ?? null
 }
 
 export async function putCached(
-  admin: SupabaseClient,
+  admin: AdminClient,
   key: string,
   meta: { provider: string; model_used: string; prompt_version: string; feature: string; language?: string },
   output: unknown,
@@ -192,5 +198,5 @@ export async function putCached(
     },
     { onConflict: 'cache_key', ignoreDuplicates: true },
   )
-  if (error) console.error('putCached failed:', error.message)
+  if (error) logError('putCached_failed', error)
 }

@@ -30,7 +30,7 @@ export function loadWorkerConfig(env: Environment = process.env) {
     callbackSecret,
     workerId: env.PDF_WORKER_ID?.trim() || `${os.hostname()}:${process.pid}`,
     pipelineVersion: env.PDF_PIPELINE_VERSION?.trim() || 'pdf-worker-v1',
-    chunkingVersion: env.PDF_CHUNKING_VERSION?.trim() || 'section-aware-v2',
+    chunkingVersion: env.PDF_CHUNKING_VERSION?.trim() || 'unified-v3',
     concurrency: numberValue(env, 'PDF_WORKER_CONCURRENCY', 1, 1, 4),
     pollMs: numberValue(env, 'PDF_WORKER_POLL_MS', 1500, 250, 60_000),
     leaseSeconds,

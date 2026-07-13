@@ -2,8 +2,9 @@
 // earnings are reserved atomically before the external call and fully restored
 // if Stripe rejects the transfer.
 
-import { preflight, jsonResponse, errorResponse, errors } from '../_shared/http.ts'
-import { adminClient, requireUser } from '../_shared/supabase.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
+import { adminClient, requireUser, type AdminClient } from '../_shared/supabase.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 import { isDefinitiveStripeFailure, requireBillingRuntime, stripeRequest } from '../_shared/billing.ts'
 
 type ReservedPayout = {
@@ -19,23 +20,25 @@ type StripeTransfer = { id: string }
 type ProviderAttempt = { attempt_id: string }
 const REQUEST_RE = /^[a-zA-Z0-9:_-]{16,160}$/
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
+  const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
   if (req.method !== 'POST') return jsonResponse({ error: { code: 'method_not_allowed' } }, 405, req)
 
+  logger.info('payout_request_received')
+
   try {
     const runtime = requireBillingRuntime('payout')
     const { id: userId } = await requireUser(req)
-    const body = await req.json().catch(() => null)
+    const body = await parseJsonBody(req)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
     const credits = Number(body.credits)
     const requestId = String(body.requestId ?? '').trim()
     if (!Number.isInteger(credits) || credits <= 0) throw errors.badRequest('Numero di crediti non valido.')
     if (!REQUEST_RE.test(requestId)) throw errors.badRequest('requestId non valido.')
 
-    const admin = adminClient()
+    const admin: AdminClient = adminClient()
     const { data, error } = await admin.rpc('billing_reserve_payout', {
       p_owner: userId,
       p_credits: credits,

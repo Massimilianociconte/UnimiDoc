@@ -7,45 +7,26 @@
 //                      expensive SHA-256, magic-byte and qpdf verification.
 // Publication and credit rewards remain separate moderation operations.
 
-import { preflight, jsonResponse, errorResponse, errors, AppError } from '../_shared/http.ts'
-import { adminClient, requireUser } from '../_shared/supabase.ts'
+import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody } from '../_shared/http.ts'
+import { adminClient, requireUser, type AdminClient } from '../_shared/supabase.ts'
+import { UUID_RE, HASH_RE, DEGREE_SLUG_RE, DEFAULT_DEGREE_SLUG, MAX_UPLOADS_PER_HOUR, INITIAL_PIPELINE_STAGES, POST_PROCESSING_STAGES, safeName, parseTags } from '../_shared/constants.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-const HASH_RE = /^[a-f0-9]{64}$/i
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-const DEGREE_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
-// Historic default: every document uploaded before the multi-degree registry
-// belongs to Scienze biologiche (L-13), so clients that omit degreeSlug keep
-// the old behaviour.
-const DEFAULT_DEGREE_SLUG = 'scienze-biologiche'
-// Anti-abuse: draft creation mints signed upload URLs, so cap how many drafts a
-// single account can open per hour. Jobs are queued only after byte validation.
-const MAX_UPLOADS_PER_HOUR = 20
-const INITIAL_PIPELINE_STAGES = ['compress', 'extract', 'ocr', 'layout', 'figures', 'outline', 'quality_review'] as const
-const POST_PROCESSING_STAGES = ['rag_index'] as const
-// deno-lint-ignore no-explicit-any
-const PDF_PIPELINE_VERSION = (globalThis as any).Deno?.env.get('PDF_PIPELINE_VERSION')?.trim() || 'pdf-worker-v1'
+const PDF_PIPELINE_VERSION = (globalThis as { Deno?: { env?: { get(key: string): string | undefined } } }).Deno?.env?.get('PDF_PIPELINE_VERSION')?.trim() || 'pdf-worker-v1'
 // New uploads are unsafe without a live consumer: drafts would remain queued
 // indefinitely. Activation is an explicit post-deploy operator step.
-// deno-lint-ignore no-explicit-any
-const PDF_WORKER_ENABLED = (globalThis as any).Deno?.env.get('PDF_WORKER_ENABLED') === 'true'
+//
+// FOLLOW THE RUNBOOK: docs/PDF_WORKER_RUNBOOK.md
+// - Set PDF_WORKER_ENABLED=true only after worker is running and smoke tested
+// - Keep PDF_PIPELINE_VERSION in sync between Edge and worker
+const PDF_WORKER_ENABLED = (globalThis as { Deno?: { env?: { get(key: string): string | undefined } } }).Deno?.env?.get('PDF_WORKER_ENABLED') === 'true'
 
 const clean = (value: unknown, fallback = '') => String(value ?? fallback).trim()
-const safeName = (value: unknown) =>
-  clean(value, 'documento.pdf')
-    .replace(/[/\\?%*:|"<>]/g, '-')
-    .replace(/\s+/g, ' ')
-    .slice(0, 120)
-
-function parseTags(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value.map((tag) => clean(tag).slice(0, 40)).filter(Boolean).slice(0, 12)
-}
 
 // Storage list is intentionally lightweight. Full-byte integrity verification
 // belongs to the native worker, not to the 256 MB / CPU-bounded Edge runtime.
-// deno-lint-ignore no-explicit-any
-async function assertUploadedObjectPresent(admin: any, bucket: string, objectPath: string, expectedSize: number) {
+async function assertUploadedObjectPresent(admin: AdminClient, bucket: string, objectPath: string, expectedSize: number) {
   const slash = objectPath.lastIndexOf('/')
   const folder = objectPath.slice(0, slash)
   const fileName = objectPath.slice(slash + 1)
@@ -62,8 +43,7 @@ async function assertUploadedObjectPresent(admin: any, bucket: string, objectPat
   }
 }
 
-// deno-lint-ignore no-explicit-any
-async function finalizeUpload(admin: any, userId: string, body: Record<string, unknown>, req: Request): Promise<Response> {
+async function finalizeUpload(admin: AdminClient, userId: string, body: Record<string, unknown>, req: Request): Promise<Response> {
   const documentId = clean(body.documentId)
   if (!UUID_RE.test(documentId)) throw errors.badRequest('documentId non valido.')
 
@@ -153,20 +133,23 @@ async function cancelUpload(admin: any, userId: string, body: Record<string, unk
   return jsonResponse({ documentId, status: 'cancelled' }, 200, req)
 }
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
+  const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
+
+  logger.info('document_upload_request', { action: 'start' })
 
   try {
     const { id: userId } = await requireUser(req)
     const admin = adminClient()
-    const body = await req.json().catch(() => null)
+    const body = await parseJsonBody(req)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
     const action = clean(body.action, 'create').toLowerCase()
     if (!['create', 'finalize', 'cancel'].includes(action)) throw errors.badRequest('Azione upload non supportata.')
     if (action === 'cancel') return await cancelUpload(admin, userId, body, req)
     if (!PDF_WORKER_ENABLED) {
+      logger.warn('pdf_worker_unavailable', { documentId: body.documentId })
       throw new AppError(503, 'pdf_worker_unavailable', 'Nuovi caricamenti temporaneamente in pausa: elaborazione documenti non attiva.')
     }
     if (action === 'finalize') return await finalizeUpload(admin, userId, body, req)

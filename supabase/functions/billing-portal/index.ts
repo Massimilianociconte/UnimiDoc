@@ -3,16 +3,19 @@
 
 import { preflight, jsonResponse, errorResponse } from '../_shared/http.ts'
 import { adminClient, requireUser } from '../_shared/supabase.ts'
+import { createRequestLogger } from '../_shared/log.ts'
 import { billingReturnUrl, requireBillingRuntime, stripeRequest } from '../_shared/billing.ts'
 
 type PortalContext = { stripe_customer_id: string }
 type PortalSession = { url: string }
 
-// deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
+  const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
   if (req.method !== 'POST') return jsonResponse({ error: { code: 'method_not_allowed' } }, 405, req)
+
+  logger.info('billing_portal_request')
 
   try {
     const runtime = requireBillingRuntime('portal')
