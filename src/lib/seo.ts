@@ -7,7 +7,7 @@ import type { DocumentItem } from '../data'
 // la scheda specifica, non solo la home del sito.
 
 export const SITE_NAME = 'UnimiDoc'
-export const SITE_TAGLINE = 'Appunti verificati per Scienze Biologiche L-13 · Università degli Studi di Milano'
+export const SITE_TAGLINE = 'Appunti verificati per i corsi dell’Università degli Studi di Milano'
 
 export function slugify(value: string): string {
   return value
@@ -38,7 +38,7 @@ export function findDocumentByPath(pathname: string, documents: DocumentItem[]):
 }
 
 export function documentSeoTitle(document: DocumentItem): string {
-  return `${document.title} · ${document.subject} (${document.professor}) | Appunti Scienze Biologiche UniMi`
+  return `${document.title} · ${document.subject} (${document.professor}) | Appunti UniMi`
 }
 
 /** "1 anno · 2 semestre · 9 CFU" quando il corso è nel catalogo L-13. */
@@ -55,7 +55,7 @@ export function documentSeoDescription(document: DocumentItem): string {
   const courseMeta = documentCourseMeta(document)
   const summary = document.insights?.abstract || document.description
   return (
-    `${document.type} di ${document.subject}, corso di ${document.professor} — Scienze Biologiche L-13` +
+    `${document.type} di ${document.subject}, corso di ${document.professor} — ${document.degreeCourse ?? 'Università degli Studi di Milano'}` +
     `${courseMeta ? ` (${courseMeta})` : ''}, Università degli Studi di Milano (Statale). ` +
     `${document.pages} pagine, a.a. ${document.academicYear}, qualità ${document.quality.toFixed(1)}/10. ${summary}`
   ).slice(0, 300)
@@ -94,7 +94,7 @@ export function documentJsonLd(document: DocumentItem, url: string): Record<stri
       courseNode,
       ...(insights?.topics ?? []).slice(0, 8).map((topic) => ({ '@type': 'Thing', name: topic })),
     ],
-    educationalLevel: 'Laurea triennale L-13 Scienze Biologiche',
+    educationalLevel: document.degreeCourse ?? 'Corso di laurea universitario',
     teaches: insights?.topics?.length ? insights.topics.slice(0, 8).join(', ') : document.subject,
     creator: { '@type': 'Person', name: document.uploader },
     contributor: { '@type': 'Person', name: document.professor, jobTitle: 'Docente' },
