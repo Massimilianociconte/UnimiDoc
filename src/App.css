@@ -181,6 +181,23 @@ button {
   white-space: nowrap;
 }
 
+.main-nav .nav-reserved-area {
+  color: var(--primary);
+}
+
+.main-nav .nav-join {
+  padding-inline: 12px;
+  color: #fff;
+  background: var(--primary);
+  box-shadow: 0 9px 20px rgba(22, 104, 69, 0.18);
+}
+
+.main-nav .nav-join:hover,
+.main-nav .nav-join:focus-visible {
+  color: #fff;
+  background: var(--primary-dark);
+}
+
 .main-nav button.active::after {
   content: '';
   position: absolute;
@@ -199,6 +216,10 @@ button {
 .header-actions {
   justify-content: flex-end;
   gap: 10px;
+}
+
+.header-actions:empty {
+  display: none;
 }
 
 .primary-action,
@@ -3346,6 +3367,7 @@ button {
 .learning-review-grid,
 .free-study-tools-grid {
   min-width: 0;
+  width: 100%;
   max-width: 100%;
   box-sizing: border-box;
 }
@@ -8832,8 +8854,39 @@ button.dashboard-stat:hover {
     width: min(100% - 24px, 1180px);
   }
 
+  /* La navigazione pubblica resta un solo rail: le quattro destinazioni
+     principali entrano nel viewport senza creare una seconda riga. */
+  .site-header:not(.app-header) .main-nav {
+    gap: 6px;
+  }
+
+  .site-header:not(.app-header) .main-nav .nav-join {
+    display: none;
+  }
+
   .upload-page.section-wrap {
     width: calc(100% - 24px);
+  }
+
+  /* The nested upload panels were consuming most of the small-screen canvas.
+     Keep hierarchy visible but reserve the width for the actual form fields. */
+  .upload-form-card.upload-workspace {
+    gap: 14px;
+    border-radius: 12px;
+    padding: 12px;
+  }
+
+  .upload-data-panel {
+    gap: 14px;
+    padding: 12px;
+  }
+
+  .upload-fieldset {
+    padding: 12px 10px 14px;
+  }
+
+  .upload-fieldset legend {
+    padding-inline: 4px;
   }
 
   .hero-copy h1,

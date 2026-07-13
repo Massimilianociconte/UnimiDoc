@@ -842,6 +842,18 @@ function Header({
           <button className={route === 'upload' ? 'active' : ''} onClick={() => onRoute('upload')} type="button">
             Carica appunti
           </button>
+          <button
+            className={route === 'dashboard' ? 'active nav-reserved-area' : 'nav-reserved-area'}
+            onClick={() => (isLoggedIn ? onRoute('dashboard') : onAuth('login'))}
+            type="button"
+          >
+            Area riservata
+          </button>
+          {!isLoggedIn ? (
+            <button className="nav-join" onClick={() => onAuth('signup')} type="button">
+              Inizia gratis
+            </button>
+          ) : null}
         </nav>
 
         <div className="header-actions">
@@ -920,14 +932,7 @@ function Header({
               </div>
             </>
           ) : (
-            <>
-              <button className="plain-action" onClick={() => onAuth('login')} type="button">
-                Accedi
-              </button>
-              <button className="primary-action" onClick={() => onAuth('signup')} type="button">
-                Inizia gratis
-              </button>
-            </>
+            null
           )}
         </div>
       </div>
