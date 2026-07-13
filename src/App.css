@@ -2782,6 +2782,12 @@ button {
   gap: 30px;
 }
 
+/* The upload flow is a workspace rather than a reading column: let its form,
+   document metadata and study tools use the available canvas at every size. */
+.upload-page.section-wrap {
+  width: min(100% - 48px, 1440px);
+}
+
 .dashboard-page {
   padding-bottom: calc(clamp(40px, 6vw, 72px) + env(safe-area-inset-bottom, 0px));
 }
@@ -3327,7 +3333,21 @@ button {
 }
 
 .upload-workspace {
+  width: 100%;
+  max-width: none;
   gap: 18px;
+}
+
+.upload-workspace,
+.upload-data-section,
+.upload-data-panel,
+.upload-fieldset,
+.upload-workspace-tabs,
+.learning-review-grid,
+.free-study-tools-grid {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .upload-automation-grid article.is-live {
@@ -6527,6 +6547,9 @@ button {
 
   .study-card {
     min-width: 0;
+    min-height: auto;
+    overflow: visible;
+    align-content: start;
     padding: 20px 14px;
   }
 
@@ -8807,6 +8830,10 @@ button.dashboard-stat:hover {
   .section-wrap,
   .header-inner {
     width: min(100% - 24px, 1180px);
+  }
+
+  .upload-page.section-wrap {
+    width: calc(100% - 24px);
   }
 
   .hero-copy h1,
