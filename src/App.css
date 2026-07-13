@@ -6432,6 +6432,7 @@ button {
 @media (max-width: 860px) {
   .study-body {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .study-reader {
@@ -8593,11 +8594,14 @@ button.dashboard-stat:hover {
     right: 0;
   }
 
-  .main-nav,
-  .header-actions {
+  .main-nav {
     justify-content: flex-start;
     overflow-x: auto;
     width: 100%;
+  }
+
+  .header-actions {
+    overflow: visible;
   }
 
   .landing-hero,
@@ -8663,13 +8667,17 @@ button.dashboard-stat:hover {
     grid-column: 1 / -1;
   }
 
+  .form-grid,
   .form-grid.refined {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
 
+  .form-grid label,
+  .form-grid .field-wide,
   .form-grid.refined .field-wide,
-  .form-grid.refined label:not(.field-wide) {
-    grid-column: span 2;
+  .form-grid.refined label:not(.field-wide),
+  .upload-fieldset .form-grid.refined label:not(.field-wide) {
+    grid-column: 1 / -1;
   }
 
   .teacher-picker-row,
@@ -8805,14 +8813,7 @@ button.dashboard-stat:hover {
     width: 100%;
   }
 
-  .form-grid.refined {
-    grid-template-columns: 1fr;
-  }
 
-  .form-grid.refined .field-wide,
-  .form-grid.refined label:not(.field-wide) {
-    grid-column: auto;
-  }
 
   .upload-data-head {
     flex-direction: column;
