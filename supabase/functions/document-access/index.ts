@@ -62,6 +62,7 @@ type PreviewRow = {
       .select('id')
       .eq('document_id', documentId)
       .eq('buyer_id', userId)
+      .eq('status', 'active')
       .maybeSingle()
     const hasPurchase = Boolean(purchase)
     const isPublic = document.visibility === 'published'
