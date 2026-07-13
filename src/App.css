@@ -6435,14 +6435,126 @@ button {
     grid-template-rows: auto minmax(0, 1fr);
   }
 
+  .study-modal {
+    align-items: center;
+    padding: 12px;
+  }
+
   .study-reader {
-    max-height: 32vh;
+    max-height: 26svh;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+    min-width: 0;
+    padding: 16px;
   }
 
   .study-shell {
-    max-height: 92svh;
+    max-height: calc(100svh - 24px);
+    border-radius: 16px;
+  }
+
+  .study-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px 12px;
+    padding: 14px;
+  }
+
+  .study-head-title {
+    min-width: 0;
+  }
+
+  .study-head-title strong {
+    font-size: 16px;
+  }
+
+  .study-head-title small {
+    max-width: 100%;
+  }
+
+  .study-close {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .study-top-tabs {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    min-width: 0;
+    overflow-x: auto;
+    padding-bottom: 1px;
+    scrollbar-width: none;
+  }
+
+  .study-top-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .study-top-tabs button {
+    flex: 0 0 auto;
+    padding: 7px 10px;
+    font-size: 12px;
+  }
+
+  .reader-toolbar {
+    top: -16px;
+    margin: -16px -16px 14px;
+    padding: 12px 14px;
+  }
+
+  .study-panel {
+    min-width: 0;
+    gap: 12px;
+    overflow-x: hidden;
+    padding: 14px;
+  }
+
+  .study-mode-tabs {
+    min-width: 0;
+    gap: 4px;
+    padding: 3px;
+  }
+
+  .study-mode-tabs button {
+    min-width: 0;
+    overflow: hidden;
+    padding: 0 4px;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .study-card {
+    min-width: 0;
+    padding: 20px 14px;
+  }
+
+  .study-card-front {
+    font-size: clamp(18px, 5vw, 21px);
+    overflow-wrap: anywhere;
+  }
+
+  .study-card-back,
+  .study-card-hint,
+  .study-source {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .study-card-actions button {
+    min-width: 0;
+    padding: 8px 9px;
+  }
+
+  .study-nav {
+    grid-template-columns: 36px 36px minmax(0, 1fr) 36px 36px;
+    gap: 6px;
+  }
+
+  .study-nav button {
+    width: 36px;
+    height: 36px;
   }
 }
 
@@ -12187,6 +12299,23 @@ button.dashboard-stat:hover {
     padding: 26px 28px;
   }
 
+  .dashboard-page,
+  .dashboard-hero,
+  .dashboard-hero > div,
+  .dashboard-layout,
+  .dashboard-main,
+  .dashboard-side,
+  .dashboard-view,
+  .dashboard-view > *,
+  .dashboard-section,
+  .dashboard-section > *,
+  .dashboard-section > * > *,
+  .flashcard-archive-list,
+  .flashcard-archive-row {
+    min-width: 0;
+    max-width: 100%;
+  }
+
   .dashboard-hero img {
     display: none;
   }
@@ -12229,6 +12358,42 @@ button.dashboard-stat:hover {
 }
 
 @media (max-width: 520px) {
+  .dashboard-hero h1,
+  .dashboard-hero p {
+    max-width: none;
+    overflow-wrap: anywhere;
+  }
+
+  .dashboard-hero-actions > * {
+    max-width: 100%;
+  }
+
+  .dashboard-nav {
+    scroll-padding-inline: 20px;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-x: contain;
+  }
+
+  .dashboard-nav-tab {
+    min-width: 0;
+    scroll-snap-align: start;
+  }
+
+  .flashcard-archive-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .flashcard-archive-row > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .flashcard-archive-row strong,
+  .flashcard-archive-row small {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
   .dashboard-state-banner {
     align-items: flex-start;
     flex-wrap: wrap;
