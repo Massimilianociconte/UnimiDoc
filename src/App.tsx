@@ -204,6 +204,7 @@ import {
   DEFAULT_DEGREE_SLUG,
   DEGREE_PROGRAMS,
   degreeCourseLabel,
+  degreeProgramIconPath,
   degreeProgramPath,
   degreeProgramsByArea,
   degreeTypeOf,
@@ -1098,6 +1099,29 @@ function DegreeDirectory({ compact, onOpenDegree }: { compact?: boolean; onOpenD
   )
 }
 
+function DegreeProgramIcon({
+  program,
+  className,
+  eager = false,
+}: {
+  program: DegreeProgram
+  className: string
+  eager?: boolean
+}) {
+  return (
+    <span aria-hidden="true" className={className}>
+      <img
+        alt=""
+        decoding="async"
+        height={512}
+        loading={eager ? 'eager' : 'lazy'}
+        src={degreeProgramIconPath(program)}
+        width={512}
+      />
+    </span>
+  )
+}
+
 function DegreeChip({ program, onOpenDegree }: { program: DegreeProgram; onOpenDegree: (program: DegreeProgram) => void }) {
   const cicloUnico = degreeTypeOf(program) === 'ciclo-unico'
   const interateneo = Boolean(program.interateneo)
@@ -1111,13 +1135,16 @@ function DegreeChip({ program, onOpenDegree }: { program: DegreeProgram; onOpenD
       }}
       role="listitem"
     >
-      <strong>{program.name}</strong>
-      <span>
-        {cicloUnico ? <em className="degree-chip-badge">Ciclo unico</em> : null}
-        {interateneo ? <em className="degree-chip-badge interateneo" title={`Interateneo · ${program.interateneo}`}>Interateneo</em> : null}
-        {program.classe}
-        {program.catalogReady ? ' · piano disponibile' : ''}
-        {program.activeFrom ? ` · dal ${program.activeFrom}` : ''}
+      <DegreeProgramIcon className="degree-chip-icon" program={program} />
+      <span className="degree-chip-copy">
+        <strong>{program.name}</strong>
+        <span>
+          {cicloUnico ? <em className="degree-chip-badge">Ciclo unico</em> : null}
+          {interateneo ? <em className="degree-chip-badge interateneo" title={`Interateneo · ${program.interateneo}`}>Interateneo</em> : null}
+          {program.classe}
+          {program.catalogReady ? ' · piano disponibile' : ''}
+          {program.activeFrom ? ` · dal ${program.activeFrom}` : ''}
+        </span>
       </span>
     </a>
   )
@@ -1183,23 +1210,26 @@ function DegreeProgramPage({
         <ChevronRight size={13} />
         <span>{program.name}</span>
       </nav>
-      <header className="degree-page-hero">
-        <p className="dashboard-kicker"><GraduationCap size={15} /> {program.area}</p>
-        <h1>Appunti per {program.name}</h1>
-        <p className="degree-page-lead">
-          {degreeTypeOf(program) === 'ciclo-unico' ? 'Laurea magistrale a ciclo unico' : 'Laurea triennale'}, classe {program.classe}
-          {program.interateneo ? ` · interateneo con ${program.interateneo}` : ''}
-          {program.activeFrom ? ` · attivo dall’a.a. ${program.activeFrom}` : ''} — Università degli Studi di
-          Milano. Dispense, riassunti, schemi ed esercizi caricati dagli studenti e verificati prima della
-          pubblicazione.
-        </p>
-        <div className="degree-page-actions">
-          <button className="primary-action" onClick={() => onRoute('upload')} type="button">
-            <Upload size={17} /> Carica appunti
-          </button>
-          <button className="degree-secondary-action" onClick={() => onRoute('app')} type="button">
-            <Search size={16} /> Esplora i materiali
-          </button>
+      <header className="degree-page-hero degree-program-hero">
+        <DegreeProgramIcon className="degree-page-icon" eager program={program} />
+        <div className="degree-page-hero-copy">
+          <p className="dashboard-kicker"><GraduationCap size={15} /> {program.area}</p>
+          <h1>Appunti per {program.name}</h1>
+          <p className="degree-page-lead">
+            {degreeTypeOf(program) === 'ciclo-unico' ? 'Laurea magistrale a ciclo unico' : 'Laurea triennale'}, classe {program.classe}
+            {program.interateneo ? ` · interateneo con ${program.interateneo}` : ''}
+            {program.activeFrom ? ` · attivo dall’a.a. ${program.activeFrom}` : ''} — Università degli Studi di
+            Milano. Dispense, riassunti, schemi ed esercizi caricati dagli studenti e verificati prima della
+            pubblicazione.
+          </p>
+          <div className="degree-page-actions">
+            <button className="primary-action" onClick={() => onRoute('upload')} type="button">
+              <Upload size={17} /> Carica appunti
+            </button>
+            <button className="degree-secondary-action" onClick={() => onRoute('app')} type="button">
+              <Search size={16} /> Esplora i materiali
+            </button>
+          </div>
         </div>
       </header>
 
@@ -1403,7 +1433,16 @@ function LandingPage({
                 }}
                 type="button"
               >
-                <GraduationCap size={15} />
+                <img
+                  alt=""
+                  aria-hidden="true"
+                  className="quick-degree-icon"
+                  decoding="async"
+                  height={512}
+                  loading="lazy"
+                  src={degreeProgramIconPath(program)}
+                  width={512}
+                />
                 {program.name}
               </button>
             ))}

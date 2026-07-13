@@ -178,6 +178,11 @@ export function degreeProgramPath(program: DegreeProgram): string {
   return `/corsi/${program.slug}`
 }
 
+/** Icona custom del corso, generata e ottimizzata come asset WebP locale. */
+export function degreeProgramIconPath(program: DegreeProgram): string {
+  return `/degree-icons/${program.slug}.webp`
+}
+
 export function findDegreeByPath(pathname: string): DegreeProgram | null {
   const match = pathname.match(/^\/corsi\/([^/]+)\/?$/)
   if (!match) return null

@@ -38,3 +38,8 @@
   for = "/course-icons/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/degree-icons/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
