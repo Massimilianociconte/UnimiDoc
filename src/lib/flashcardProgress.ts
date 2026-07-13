@@ -544,6 +544,7 @@ async function loadRemoteDashboard(user: AppAuthUser, documents: DocumentItem[])
       supabase
         .from('user_flashcard_progress')
         .select('*')
+        .eq('owner_id', user.id)
         .order('updated_at', { ascending: false })
         .limit(500),
       supabase
@@ -566,7 +567,8 @@ async function loadRemoteDashboard(user: AppAuthUser, documents: DocumentItem[])
         .select('id, title, professor')
         .eq('owner_id', user.id),
     ])
-    if (progress.error || cards.error || votes.error || rollups.error) return null
+    const firstError = progress.error || cards.error || votes.error || rollups.error || ownedDocuments.error
+    if (firstError) throw new Error(firstError.message || 'flashcard_dashboard_load_failed')
 
     const voteMap = new Map(((votes.data as QualityVoteRow[] | null) ?? []).map((row) => [row.flashcard_id, row.vote]))
     const cardRows = (cards.data as FlashcardRow[] | null) ?? []
@@ -610,14 +612,17 @@ async function loadRemoteDashboard(user: AppAuthUser, documents: DocumentItem[])
       authorPerformance: authorPerformance(user, documentQualities),
       source: 'live',
     }
-  } catch {
-    return null
+  } catch (error) {
+    throw error instanceof Error ? error : new Error('flashcard_dashboard_load_failed')
   }
 }
 
 export async function loadFlashcardDashboardData(user: AppAuthUser, documents: DocumentItem[]): Promise<FlashcardDashboardData> {
   const remote = await loadRemoteDashboard(user, documents)
-  if (remote && (remote.records.length || remote.documentQualities.length)) return remote
+  // For real accounts an empty remote result is authoritative. Falling back to
+  // localStorage after a refresh/login would reintroduce stale device-specific
+  // progress and hide backend failures.
+  if (remote) return remote
 
   const local = loadLocalStore(user.id)
   const localQualities = local.documentQualities.length ? local.documentQualities : documentQualityFromLocal(local.records)
