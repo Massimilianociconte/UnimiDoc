@@ -79,16 +79,12 @@ import premiumStack from './assets/generated/premium-stack.webp'
 import uploadBackpack from './assets/generated/upload-backpack.webp'
 import {
   allL13Professors,
-  featuredCourses,
   findCourse,
   formatCourseMeta,
   getCourseLines,
   getCourseProfessors,
-  landingCourses,
   searchableCourses,
-  type CourseInfo,
   type CourseLine,
-  type CourseYear,
 } from './courseCatalog'
 import { documentTypes, initialDocuments, professors, subjects, type DocumentItem } from './data'
 import { DEFAULT_FREE_FLASHCARD_LIMIT, DEFAULT_PREMIUM_FLASHCARD_LIMIT } from './lib/flashcardConfig'
@@ -265,29 +261,112 @@ type AuthFormValues = {
 // Premium AI Edge Functions authenticate with the live Supabase JWT.
 setAccessTokenProvider(getSupabaseAccessToken)
 
-const appDocuments = initialDocuments.filter((document) => document.status === 'approved')
+const biologyDemoDocuments = initialDocuments
+  .filter((document) => document.status === 'approved')
+  .map((document) => ({
+    ...document,
+    degreeSlug: document.degreeSlug ?? DEFAULT_DEGREE_SLUG,
+    degreeCourse: document.degreeCourse ?? 'Scienze biologiche (L-13)',
+  }))
 
-const featuredCourseCards = featuredCourses
-  .map((courseName) => findCourse(courseName))
-  .filter((course): course is CourseInfo => Boolean(course))
-
-const courseStats = landingCourses.map((course, index) => ({
-  ...course,
-  count: index < 3 ? 'Materia in evidenza' : 'Catalogo L-13',
-}))
-
-const featuredFilterSubjects = featuredCourseCards.map((course) => course.name)
-const orderedFilterSubjects = [
-  ...featuredFilterSubjects,
-  ...subjects.filter((subject) => !featuredFilterSubjects.includes(subject)),
+const crossDegreeDemoDocuments: DocumentItem[] = [
+  {
+    ...biologyDemoDocuments[0],
+    id: 'doc-inf-01',
+    title: 'Architetture streaming - Appunti e schemi',
+    subject: 'Architetture per trasmissioni real time e in streaming',
+    professor: 'Dario Maggiorini',
+    academicYear: '2026/27',
+    degreeSlug: 'informatica',
+    degreeCourse: 'Informatica (L-31)',
+    description: 'Appunti ordinati su protocolli, architetture real time e sistemi per la distribuzione di flussi multimediali.',
+    previewKind: 'diagram',
+    fileHash: 'demo-informatica-01',
+    insights: undefined,
+  },
+  {
+    ...biologyDemoDocuments[1],
+    id: 'doc-giu-01',
+    title: 'Diritto costituzionale - Concetti fondamentali',
+    subject: 'Diritto costituzionale',
+    professor: 'Francesca Biondi',
+    academicYear: '2026/27',
+    degreeSlug: 'giurisprudenza',
+    degreeCourse: 'Giurisprudenza (LMG/01)',
+    description: 'Schemi e collegamenti essenziali su fonti, diritti fondamentali e organizzazione costituzionale.',
+    fileHash: 'demo-giurisprudenza-01',
+    insights: undefined,
+  },
+  {
+    ...biologyDemoDocuments[2],
+    id: 'doc-eco-01',
+    title: 'Economia aziendale e accounting - Sintesi',
+    subject: 'Economia aziendale e accounting',
+    professor: 'Valerio Brescia',
+    academicYear: '2026/27',
+    degreeSlug: 'economia-management-ema',
+    degreeCourse: 'Economia e management (EMA) (L-18)',
+    description: 'Sintesi ragionata di contabilità, bilancio e principali modelli di gestione aziendale.',
+    fileHash: 'demo-economia-01',
+    insights: undefined,
+  },
+  {
+    ...biologyDemoDocuments[3],
+    id: 'doc-let-01',
+    title: 'Filologia classica - Metodo e testi',
+    subject: 'Filologia classica',
+    professor: 'Giovanni Antonio Benedetto',
+    academicYear: '2025/26',
+    degreeSlug: 'lettere',
+    degreeCourse: 'Lettere (L-10)',
+    description: 'Appunti sul metodo filologico, la tradizione dei testi e gli strumenti per la critica testuale.',
+    fileHash: 'demo-lettere-01',
+    insights: undefined,
+  },
+  {
+    ...biologyDemoDocuments[4],
+    id: 'doc-med-01',
+    title: 'Chimica e propedeutica biochimica - Ripasso',
+    subject: 'Chimica e propedeutica biochimica',
+    professor: 'Diego Rodolfo Colombo',
+    academicYear: '2024/25',
+    degreeSlug: 'medicina-chirurgia-polo-centrale',
+    degreeCourse: 'Medicina e chirurgia - Polo Centrale (LM-41)',
+    description: 'Ripasso strutturato dei fondamenti chimici necessari per affrontare biochimica e scienze biomediche.',
+    fileHash: 'demo-medicina-01',
+    insights: undefined,
+  },
 ]
 
-const rotatingSearchCourses = searchableCourses.map((course) => course.shortName)
+const appDocuments = [...crossDegreeDemoDocuments, ...biologyDemoDocuments]
+
+const featuredDegreeSlugs = [
+  'informatica',
+  'giurisprudenza',
+  'medicina-chirurgia-polo-centrale',
+  'economia-management-ema',
+  'lettere',
+  'scienze-biologiche',
+]
+
+const featuredDegreePrograms = featuredDegreeSlugs
+  .map((slug) => findDegreeProgram(slug))
+  .filter((program): program is DegreeProgram => Boolean(program))
+
+const rotatingSearchCourses = [
+  'Diritto costituzionale',
+  'Programmazione',
+  'Anatomia umana',
+  'Microeconomia',
+  'Letteratura italiana',
+  'Genetica',
+]
 
 const searchSuggestions = Array.from(
   new Set([
     ...searchableCourses.flatMap((course) => [course.name, course.shortName, ...(course.aliases ?? [])]),
     ...allL13Professors,
+    ...DEGREE_PROGRAMS.flatMap((program) => [program.name, program.classe]),
   ]),
 )
 
@@ -344,8 +423,8 @@ const routePaths: Record<Route, string> = {
 
 const routeSeo: Record<Route, { title: string; description: string }> = {
   landing: {
-    title: 'UnimiDoc - Appunti verificati per Scienze Biologiche UniMi',
-    description: 'Trova appunti verificati per Scienze Biologiche L-13 alla Statale di Milano.',
+    title: 'UnimiDoc - Appunti verificati per la Statale di Milano',
+    description: 'Trova appunti verificati per i corsi dell’Università degli Studi di Milano.',
   },
   login: {
     title: 'Accedi a UnimiDoc',
@@ -356,8 +435,8 @@ const routeSeo: Record<Route, { title: string; description: string }> = {
     description: 'Crea il tuo account UnimiDoc per salvare appunti, guadagnare crediti e preparare gli esami.',
   },
   app: {
-    title: 'Esplora appunti L-13 - UnimiDoc',
-    description: 'Cerca documenti, appunti, anteprime e materiali per gli esami di Scienze Biologiche L-13.',
+    title: 'Esplora gli appunti della Statale - UnimiDoc',
+    description: 'Cerca documenti, appunti e materiali per corso di laurea, esame o docente alla Statale di Milano.',
   },
   premium: {
     title: 'Premium UnimiDoc',
@@ -383,11 +462,11 @@ const routeSeo: Record<Route, { title: string; description: string }> = {
   // con i metadati specifici del file (vedi effetto SEO in App).
   document: {
     title: 'Appunti verificati - UnimiDoc',
-    description: 'Scheda documento con anteprima, valutazioni e dettagli per gli esami di Scienze Biologiche L-13.',
+    description: 'Scheda documento con anteprima, valutazioni e dettagli per gli esami della Statale di Milano.',
   },
   profile: {
     title: 'Profilo autore - UnimiDoc',
-    description: 'Profilo pubblico di un autore UnimiDoc: materiali, valutazioni, vendite e affidabilità per Scienze Biologiche L-13.',
+    description: 'Profilo pubblico di un autore UnimiDoc: materiali, valutazioni, vendite e affidabilità alla Statale di Milano.',
   },
   degrees: {
     title: 'Corsi di laurea triennale e a ciclo unico della Statale di Milano - UnimiDoc',
@@ -903,7 +982,7 @@ function DemoPageViewer({ compact = false }: { compact?: boolean }) {
 function DemoDocumentCard({ onOpen }: { onOpen: () => void }) {
   return (
     <button className="demo-document-card" onClick={onOpen} type="button">
-      <img src={demoDocumentImage} alt="Documento demo di biologia con appunti e diagrammi" />
+      <img src={demoDocumentImage} alt="Documento universitario demo con appunti e diagrammi" />
       <div className="demo-card-body">
         <span className="type-pill"><Eye size={14} /> Demo anteprima</span>
         <h3>{demoDocument.title}</h3>
@@ -957,126 +1036,6 @@ function DemoDocumentModal({ onClose, onPremium }: { onClose: () => void; onPrem
         </div>
       </section>
     </div>
-  )
-}
-
-const SUBJECT_YEAR_FILTERS: Array<{ key: CourseYear | 'all'; label: string }> = [
-  { key: 'all', label: 'Tutte' },
-  { key: '1 anno', label: '1º anno' },
-  { key: '2 anno', label: '2º anno' },
-  { key: '3 anno', label: '3º anno' },
-  { key: 'Scelta', label: 'A scelta' },
-]
-
-function SubjectsShowcase({ onExploreSubject }: { onExploreSubject: (value: string) => void }) {
-  const [yearFilter, setYearFilter] = useState<CourseYear | 'all'>('all')
-  const [expanded, setExpanded] = useState(false)
-  const [canScrollBack, setCanScrollBack] = useState(false)
-  const [canScrollForward, setCanScrollForward] = useState(true)
-  const scrollerRef = useRef<HTMLDivElement | null>(null)
-
-  const visibleCourses = useMemo(
-    () => (yearFilter === 'all' ? courseStats : courseStats.filter((course) => course.year === yearFilter)),
-    [yearFilter],
-  )
-
-  const updateScrollState = useCallback(() => {
-    const scroller = scrollerRef.current
-    if (!scroller) return
-    const maxScroll = scroller.scrollWidth - scroller.clientWidth
-    setCanScrollBack(scroller.scrollLeft > 8)
-    setCanScrollForward(scroller.scrollLeft < maxScroll - 8)
-  }, [])
-
-  useEffect(() => {
-    if (expanded) return
-    updateScrollState()
-  }, [expanded, visibleCourses, updateScrollState])
-
-  const scrollByCards = (direction: 1 | -1) => {
-    const scroller = scrollerRef.current
-    if (!scroller) return
-    scroller.scrollBy({ left: direction * Math.round(scroller.clientWidth * 0.85), behavior: 'smooth' })
-  }
-
-  const selectYear = (key: CourseYear | 'all') => {
-    setYearFilter(key)
-    scrollerRef.current?.scrollTo({ left: 0 })
-  }
-
-  return (
-    <section className="section-wrap subjects-showcase" aria-labelledby="subjects-title">
-      <div className="section-title">
-        <div>
-          <h2 id="subjects-title">Materie L-13 alla Statale</h2>
-          <p className="subjects-showcase-lead">Tutti gli insegnamenti del corso, ordinati per anno.</p>
-        </div>
-        <button
-          aria-expanded={expanded}
-          className="subjects-expand-toggle"
-          onClick={() => setExpanded((value) => !value)}
-          type="button"
-        >
-          {expanded ? 'Mostra carosello' : `Vedi tutte (${visibleCourses.length})`}
-          <ChevronDown className={expanded ? 'is-open' : ''} size={16} />
-        </button>
-      </div>
-      <div aria-label="Filtra le materie per anno" className="subjects-year-chips" role="tablist">
-        {SUBJECT_YEAR_FILTERS.map((filter) => (
-          <button
-            aria-selected={yearFilter === filter.key}
-            className={yearFilter === filter.key ? 'selected' : ''}
-            key={filter.key}
-            onClick={() => selectYear(filter.key)}
-            role="tab"
-            type="button"
-          >
-            {filter.label}
-          </button>
-        ))}
-      </div>
-      {expanded ? (
-        <div className="exam-grid">
-          {visibleCourses.map((course) => (
-            <button className="exam-card" key={course.name} onClick={() => onExploreSubject(course.name)} type="button">
-              <SubjectIcon name={course.name} />
-              <strong>{course.shortName}</strong>
-              <small>{course.year} · {course.semester} · {course.cfu} CFU</small>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="subjects-carousel">
-          <button
-            aria-label="Materie precedenti"
-            className="subjects-carousel-arrow back"
-            disabled={!canScrollBack}
-            onClick={() => scrollByCards(-1)}
-            type="button"
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <div className="subjects-carousel-track" onScroll={updateScrollState} ref={scrollerRef}>
-            {visibleCourses.map((course) => (
-              <button className="exam-card subject-slide" key={course.name} onClick={() => onExploreSubject(course.name)} type="button">
-                <SubjectIcon name={course.name} />
-                <strong>{course.shortName}</strong>
-                <small>{course.year} · {course.semester} · {course.cfu} CFU</small>
-              </button>
-            ))}
-          </div>
-          <button
-            aria-label="Materie successive"
-            className="subjects-carousel-arrow forward"
-            disabled={!canScrollForward}
-            onClick={() => scrollByCards(1)}
-            type="button"
-          >
-            <ChevronRight size={18} />
-          </button>
-        </div>
-      )}
-    </section>
   )
 }
 
@@ -1418,10 +1377,10 @@ function LandingPage({
     <main className="landing">
       <section className="landing-hero section-wrap">
         <div className="hero-copy">
-          <h1>Trova gli appunti giusti prima dell’esame</h1>
+          <h1>Gli appunti della Statale, corso per corso</h1>
           <p>
-            Appunti verificati da studenti come te. Cerca per esame, docente o corso e risparmia ore tra PDF
-            disordinati.
+            Cerca tra tutti gli {DEGREE_PROGRAMS.length} corsi di laurea UniMi per esame, docente o argomento e
+            risparmia ore tra PDF disordinati.
           </p>
           <SearchBox
             value={heroQuery}
@@ -1429,22 +1388,23 @@ function LandingPage({
               setHeroQuery(nextValue)
               setSelectedCourse('')
             }}
-            onSearch={(value) => onExploreSubject(selectedCourse || value)}
+            onSearch={(value) => onExploreSubject(value)}
           />
-          <div className="quick-chips" aria-label="Ricerche rapide">
-            {featuredCourseCards.map((course) => (
+          <div className="quick-chips" aria-label="Corsi di laurea in evidenza">
+            {featuredDegreePrograms.map((program) => (
               <button
-                aria-pressed={selectedCourse === course.name}
-                className={selectedCourse === course.name ? 'selected' : ''}
-                key={course.name}
+                aria-pressed={selectedCourse === program.slug}
+                className={selectedCourse === program.slug ? 'selected' : ''}
+                key={program.slug}
                 onClick={() => {
-                  setSelectedCourse(course.name)
-                  setHeroQuery(course.shortName)
+                  setSelectedCourse(program.slug)
+                  setHeroQuery(program.name)
+                  onOpenDegree(program)
                 }}
                 type="button"
               >
-                <SubjectIcon compact name={course.name} />
-                {course.shortName}
+                <GraduationCap size={15} />
+                {program.name}
               </button>
             ))}
           </div>
@@ -1455,7 +1415,7 @@ function LandingPage({
           </div>
         </div>
         <div className="hero-visual">
-          <img src={heroDocuments} alt="Anteprime di appunti di biologia verificati" fetchPriority="high" decoding="async" width={1536} height={1024} />
+          <img src={heroDocuments} alt="Anteprime di appunti universitari verificati" fetchPriority="high" decoding="async" width={1536} height={1024} />
         </div>
       </section>
 
@@ -1502,8 +1462,6 @@ function LandingPage({
           <DemoDocumentCard onOpen={onOpenDemo} />
         </div>
       </section>
-
-      <SubjectsShowcase onExploreSubject={onExploreSubject} />
 
       <section className="degree-directory-band section-wrap" id="corsi-di-laurea">
         <div className="degree-directory-head">
@@ -1664,6 +1622,7 @@ function DocumentCard({
       </div>
       <div className="note-tags">
         <span><SubjectIcon compact name={document.subject} />{course?.shortName ?? document.subject}</span>
+        {document.degreeCourse ? <span><GraduationCap size={14} /> {document.degreeCourse}</span> : null}
         <span>{document.pages} pagine</span>
         {document.flashcardQualityPercent ? <span><BrainCircuit size={14} /> {document.flashcardQualityPercent}% utili</span> : null}
       </div>
@@ -1889,7 +1848,8 @@ function PublicProfilePage({
   )
   const rank = buildUploaderRanking(documents).findIndex((item) => item.id === entry?.id) + 1
   const initials = uploaderName.split(' ').slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'UD'
-  const bio = `Autore della community UnimiDoc per Scienze Biologiche L-13 alla Statale di Milano. Condivide ${authored.length} material${authored.length === 1 ? 'e' : 'i'} verificati su ${new Set(authored.map((d) => d.subject)).size} materie.`
+  const degreeCount = new Set(authored.map((document) => document.degreeSlug ?? document.degreeCourse).filter(Boolean)).size
+  const bio = `Autore della community UnimiDoc alla Statale di Milano. Condivide ${authored.length} material${authored.length === 1 ? 'e' : 'i'} verificati su ${new Set(authored.map((d) => d.subject)).size} materie${degreeCount ? ` in ${degreeCount} cors${degreeCount === 1 ? 'o' : 'i'} di laurea` : ''}.`
 
   return (
     <main className="profile-page section-wrap">
@@ -2003,8 +1963,7 @@ function DocumentPage({
           <span className="type-pill"><SubjectIcon compact name={doc.subject} />{doc.type}</span>
           <h1>{doc.title}</h1>
           <p className="document-subtitle">
-            {doc.subject} · {doc.professor} · a.a. {doc.academicYear} · Scienze Biologiche L-13, Università degli
-            Studi di Milano
+            {doc.subject} · {doc.professor} · a.a. {doc.academicYear} · {doc.degreeCourse ?? 'Università degli Studi di Milano'}
           </p>
           <div className="document-badges">
             {doc.verified ? <span className="document-badge verified"><ShieldCheck size={14} /> Verificato</span> : null}
@@ -2038,7 +1997,7 @@ function DocumentPage({
             <>
               <button className="document-uploader-name" onClick={() => onOpenProfile(doc.uploader, doc.sellerId)} type="button">{doc.uploader}</button>
               <small>Affidabilità {doc.uploaderTrust}%</small>
-              <p>Autore verificato della community UnimiDoc per Scienze Biologiche.</p>
+              <p>Autore verificato della community UnimiDoc alla Statale di Milano.</p>
               <button className="document-uploader-link" onClick={() => onOpenProfile(doc.uploader, doc.sellerId)} type="button">
                 Vedi profilo e materiali <ChevronRight size={13} />
               </button>
@@ -2053,7 +2012,8 @@ function DocumentPage({
           <div><dt>Materia</dt><dd>{doc.subject}</dd></div>
           <div><dt>Docente</dt><dd>{doc.professor}</dd></div>
           <div><dt>Anno accademico</dt><dd>{doc.academicYear}</dd></div>
-          {courseMeta ? <div><dt>Corso L-13</dt><dd>{courseMeta}</dd></div> : null}
+          {courseMeta ? <div><dt>Dettagli insegnamento</dt><dd>{courseMeta}</dd></div> : null}
+          {doc.degreeCourse ? <div><dt>Corso di laurea</dt><dd>{doc.degreeCourse}</dd></div> : null}
           <div><dt>Tipo</dt><dd>{doc.type}</dd></div>
           <div><dt>Esame</dt><dd>{doc.examType}</dd></div>
           <div><dt>Pagine</dt><dd>{doc.pages}</dd></div>
@@ -2100,8 +2060,8 @@ function DocumentPage({
       <section className="document-seo-copy">
         <h2>Appunti di {doc.subject} alla Statale di Milano</h2>
         <p>
-          Questo materiale copre il corso di {doc.subject} tenuto da {doc.professor} per la laurea triennale in
-          Scienze Biologiche (L-13) all’Università degli Studi di Milano. È stato caricato da uno studente del corso,
+          Questo materiale copre il corso di {doc.subject} tenuto da {doc.professor} per {doc.degreeCourse ?? 'un corso di laurea'}
+          {' '}all’Università degli Studi di Milano. È stato caricato da uno studente del corso,
           verificato dalla community e valutato {doc.quality.toFixed(1)}/10 da chi lo ha usato per preparare l’esame.
         </p>
       </section>
@@ -2142,6 +2102,7 @@ function AppHome({
   onPreview,
   onOpenDocument,
   onOpenProfile,
+  onOpenDegree,
   initialSubject,
   initialQuery,
 }: {
@@ -2154,10 +2115,12 @@ function AppHome({
   onPreview: (document: DocumentItem) => void
   onOpenDocument: (document: DocumentItem) => void
   onOpenProfile: (name: string, sellerId?: string) => void
+  onOpenDegree: (program: DegreeProgram) => void
   initialSubject: string
   initialQuery: string
 }) {
   const [activeSubject, setActiveSubject] = useState(initialSubject || 'Tutti')
+  const [activeDegreeSlug, setActiveDegreeSlug] = useState('Tutti')
   const [activeProfessor, setActiveProfessor] = useState('Tutti')
   const [activeQuery, setActiveQuery] = useState(initialQuery)
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -2170,43 +2133,51 @@ function AppHome({
     setActiveQuery(initialQuery)
   }, [initialQuery])
 
-  // Professori raggruppati per materia (compatto): quando una materia è
-  // selezionata mostra solo i suoi docenti, altrimenti raggruppa per le materie
-  // con documenti disponibili.
+  const documentsForDegree = useMemo(
+    () => documents.filter((document) => activeDegreeSlug === 'Tutti' || (document.degreeSlug ?? DEFAULT_DEGREE_SLUG) === activeDegreeSlug),
+    [activeDegreeSlug, documents],
+  )
+
+  const availableSubjects = useMemo(
+    () => Array.from(new Set(documentsForDegree.map((document) => document.subject))).sort((a, b) => a.localeCompare(b, 'it')),
+    [documentsForDegree],
+  )
+
+  // I docenti derivano dai materiali del corso selezionato: nessun filtro
+  // L-13 viene riutilizzato fuori dal relativo corso di laurea.
   const professorGroups = useMemo(() => {
     const subjectsToShow =
       activeSubject !== 'Tutti'
         ? [activeSubject]
-        : Array.from(new Set(documents.map((document) => document.subject)))
+        : availableSubjects
     return subjectsToShow
       .map((subjectName) => {
-        const course = findCourse(subjectName)
-        const fromCatalog = course ? getCourseProfessors(course, 'Tutti') : []
-        const fromDocs = documents.filter((d) => d.subject === subjectName).map((d) => d.professor)
-        const professorsList = Array.from(new Set([...fromDocs, ...fromCatalog])).filter(Boolean)
-        return { subject: subjectName, shortName: course?.shortName ?? subjectName, professors: professorsList }
+        const professorsList = Array.from(new Set(documentsForDegree.filter((d) => d.subject === subjectName).map((d) => d.professor))).filter(Boolean)
+        return { subject: subjectName, shortName: subjectName, professors: professorsList }
       })
       .filter((group) => group.professors.length > 0)
-  }, [activeSubject, documents])
+  }, [activeSubject, availableSubjects, documentsForDegree])
 
   // Listing ordinato per punteggio multi-segnale: con i filtri attivi diventa
   // di fatto la classifica per materia/docente richiesta dalla query.
   const visibleDocuments = useMemo(
     () =>
       sortByRanking(
-        documents.filter(
+        documentsForDegree.filter(
           (document) =>
             (activeSubject === 'Tutti' || document.subject === activeSubject) &&
             (activeProfessor === 'Tutti' || document.professor === activeProfessor) &&
             (!activeQuery || documentMatchesQuery(document, activeQuery)),
         ),
       ),
-    [activeSubject, activeProfessor, activeQuery, documents],
+    [activeSubject, activeProfessor, activeQuery, documentsForDegree],
   )
 
   const advancedActive = activeProfessor !== 'Tutti'
-  const anyFilterActive = activeSubject !== 'Tutti' || activeProfessor !== 'Tutti' || Boolean(activeQuery)
+  const selectedDegree = activeDegreeSlug === 'Tutti' ? null : findDegreeProgram(activeDegreeSlug) ?? null
+  const anyFilterActive = activeDegreeSlug !== 'Tutti' || activeSubject !== 'Tutti' || activeProfessor !== 'Tutti' || Boolean(activeQuery)
   const resetFilters = () => {
+    setActiveDegreeSlug('Tutti')
     setActiveSubject('Tutti')
     setActiveProfessor('Tutti')
     setActiveQuery('')
@@ -2229,14 +2200,44 @@ function AppHome({
 
       <section className="course-hero section-wrap">
         <div>
-          <h1>Scienze Biologiche L-13</h1>
-          <p>Meno caccia al PDF, più tempo per ripassare.</p>
-          <SearchBox compact />
+          <h1>Appunti della Statale di Milano</h1>
+          <p>Scegli il tuo corso, cerca l’esame e vai dritto al materiale che ti serve.</p>
+          <SearchBox compact value={activeQuery} onChange={setActiveQuery} onSearch={setActiveQuery} />
+          <div className="explore-context-row">
+            <label className="explore-degree-picker">
+              <GraduationCap size={18} />
+              <span>Corso di laurea</span>
+              <select
+                value={activeDegreeSlug}
+                onChange={(event) => {
+                  setActiveDegreeSlug(event.target.value)
+                  setActiveSubject('Tutti')
+                  setActiveProfessor('Tutti')
+                }}
+              >
+                <option value="Tutti">Tutti i corsi della Statale</option>
+                {degreeProgramsByArea().map(({ area, programs }) => (
+                  <optgroup key={area} label={area}>
+                    {programs.map((program) => <option key={program.slug} value={program.slug}>{program.name} · {program.classe}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+            {selectedDegree ? (
+              <button className="explore-course-link" onClick={() => onOpenDegree(selectedDegree)} type="button">
+                Piano e docenti del corso <ArrowRight size={15} />
+              </button>
+            ) : (
+              <button className="explore-course-link" onClick={() => onRoute('degrees')} type="button">
+                Sfoglia tutti i corsi <ArrowRight size={15} />
+              </button>
+            )}
+          </div>
           <div className="filter-bar">
             <div className="filter-bar-top">
               <div className="filter-row">
                 <span className="filter-label">Filtra la lista</span>
-                {['Tutti', ...orderedFilterSubjects].map((subject) => (
+                {['Tutti', ...availableSubjects].map((subject) => (
                   <button
                     className={activeSubject === subject ? 'selected' : ''}
                     key={subject}
@@ -2244,7 +2245,7 @@ function AppHome({
                     type="button"
                   >
                     <SubjectIcon compact name={subject} />
-                    <span>{subject === 'Tutti' ? 'Tutti' : (findCourse(subject)?.shortName ?? subject)}</span>
+                    <span>{subject === 'Tutti' ? 'Tutte le materie' : subject}</span>
                   </button>
                 ))}
               </div>
@@ -2351,8 +2352,8 @@ function AppHome({
           ) : (
             <div className="empty-documents">
               <SubjectIcon name={activeSubject} />
-              <h3>Questa materia è pronta, mancano solo gli appunti giusti.</h3>
-              <p>Puoi caricare materiale tuo o tornare su “Tutti” per esplorare i documenti già verificati.</p>
+              <h3>{selectedDegree ? `Il catalogo di ${selectedDegree.name} aspetta i primi appunti.` : 'Nessun materiale corrisponde ai filtri selezionati.'}</h3>
+              <p>Carica materiale tuo oppure azzera i filtri per esplorare i documenti già disponibili alla Statale.</p>
               <button className="primary-action" onClick={() => onRoute('upload')} type="button">
                 <Upload size={18} />
                 Carica appunti
@@ -2696,7 +2697,7 @@ function PremiumPage({
           <span className="premium-kicker"><Crown size={15} /> UnimiDoc Premium</span>
           <h1>Smetti di rincorrere gli appunti. Inizia a studiare.</h1>
           <p>
-            Tutto il materiale di Scienze Biologiche L-13 in un posto solo: verificato, cercabile e già pronto per il
+            Il materiale dei corsi della Statale in un posto solo: verificato, cercabile e già pronto per il
             ripasso. Meno caos, meno tempo perso, più voti.
           </p>
           <div className="premium-hero-actions">
@@ -6327,9 +6328,9 @@ function UploadPage({
             <div className="upload-data-head">
               <div>
                 <h2>Dati del documento</h2>
-                <p>Tre passaggi: informazioni essenziali, dettagli del corso, presentazione. Corso e docenti arrivano dal catalogo L-13 2025/26.</p>
+                <p>Tre passaggi: informazioni essenziali, dettagli del corso, presentazione. Corso e docenti arrivano dal catalogo ufficiale UniMi.</p>
               </div>
-              <span>Base UniMi L-13</span>
+              <span>{DEGREE_PROGRAMS.length} corsi UniMi</span>
             </div>
 
             <div aria-label="Completamento dei dati richiesti" className="upload-checklist" role="status">
@@ -6939,7 +6940,7 @@ function UserDashboardPage({
                   : dataIsLive
                     ? 'Dati aggiornati'
                     : 'Account attivo'}
-              {' '}· Scienze Biologiche L-13
+              {' '}· Studente Statale
             </small>
           </div>
         </article>
@@ -7854,7 +7855,7 @@ function SettingsPage({
             <div className="settings-account-id">
               <h2>{user.name}</h2>
               <p title={user.email}>{user.email}</p>
-              <small>Scienze Biologiche L-13</small>
+              <small>Università degli Studi di Milano</small>
             </div>
           </article>
           <article className="settings-credit-card">
@@ -8287,14 +8288,14 @@ function App() {
     const title = isDocPage
       ? documentSeoTitle(routeDocument)
       : isProfilePage
-        ? `${routeProfile.name} · Appunti Scienze Biologiche UniMi | UnimiDoc`
+        ? `${routeProfile.name} · Appunti UniMi | UnimiDoc`
         : isDegreePage
           ? degreeSeoTitle(routeDegree)
           : seo.title
     const descriptionText = isDocPage
       ? documentSeoDescription(routeDocument)
       : isProfilePage
-        ? `Materiali, valutazioni e vendite di ${routeProfile.name} per Scienze Biologiche L-13 alla Statale di Milano.`
+        ? `Materiali, valutazioni e vendite di ${routeProfile.name} alla Statale di Milano.`
         : isDegreePage
           ? degreeSeoDescription(routeDegree)
           : seo.description
@@ -8587,7 +8588,7 @@ function App() {
           subject: document.subject,
           type: document.type,
           university: document.university ?? 'Università degli Studi di Milano',
-          course: document.degreeCourse ?? 'Scienze Biologiche L-13',
+          course: document.degreeCourse ?? 'Università degli Studi di Milano',
           professor: document.professor,
           academicYear: document.academicYear,
           uploader: document.uploader,
@@ -8678,6 +8679,7 @@ function App() {
           onAuth={goAuth}
           onDownload={handleDownload}
           onOpenDocument={openDocumentPage}
+          onOpenDegree={openDegreePage}
           onOpenProfile={openProfile}
           onPreview={setPreviewDocument}
           onRoute={navigateRoute}

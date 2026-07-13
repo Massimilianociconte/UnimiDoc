@@ -531,6 +531,95 @@ button {
   margin-top: 16px;
 }
 
+.explore-context-row {
+  max-width: 820px;
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.explore-degree-picker {
+  min-width: 0;
+  flex: 1 1 520px;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-height: 48px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: var(--primary);
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(20, 62, 45, 0.05);
+}
+
+.explore-degree-picker > span {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.explore-degree-picker select {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  padding: 8px 28px 8px 8px;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.explore-degree-picker select:focus-visible {
+  outline: 2px solid rgba(22, 104, 69, 0.3);
+  outline-offset: 2px;
+}
+
+.explore-course-link {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(22, 104, 69, 0.2);
+  border-radius: 8px;
+  padding: 0 14px;
+  color: var(--primary);
+  background: #f4fcf7;
+  font-weight: 850;
+  line-height: 1.2;
+  text-align: center;
+}
+
+@media (max-width: 680px) {
+  .explore-context-row {
+    flex-direction: column;
+  }
+
+  .explore-degree-picker {
+    flex-basis: auto;
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 10px 12px;
+  }
+
+  .explore-degree-picker > span {
+    grid-column: 2;
+  }
+
+  .explore-degree-picker select {
+    grid-column: 1 / -1;
+    padding-left: 0;
+  }
+
+  .explore-course-link {
+    min-height: 46px;
+  }
+}
+
 .filter-bar-top {
   display: flex;
   align-items: flex-start;
@@ -1401,6 +1490,12 @@ button {
   grid-template-columns: minmax(0, 1fr) 340px;
   gap: 28px;
   margin-top: 34px;
+}
+
+.browse-layout > *,
+.study-sidebar > *,
+.note-card > * {
+  min-width: 0;
 }
 
 .notes-grid {
@@ -2307,6 +2402,10 @@ button {
   gap: 8px;
   margin-top: 14px;
   color: var(--primary);
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  text-align: right;
 }
 
 .credits-panel {

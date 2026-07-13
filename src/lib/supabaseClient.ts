@@ -147,6 +147,7 @@ type CatalogRow = {
   exam_type: string | null
   semester: string | null
   degree_course: string | null
+  degree_slug?: string | null
   university: string | null
   tags: string[] | null
   compatible_exams: string[] | null
@@ -160,7 +161,7 @@ type CatalogRow = {
   original_size_bytes?: number | null
 }
 
-const CATALOG_COLUMNS = 'id, seller_id, title, course_name, professor, academic_year, page_count, language, preview_policy, description, exam_type, semester, degree_course, university, tags, compatible_exams, insights, price_credits, flashcard_quality_percent, flashcard_reviewer_count, created_at, updated_at'
+const CATALOG_COLUMNS = 'id, seller_id, title, course_name, professor, academic_year, page_count, language, preview_policy, description, exam_type, semester, degree_course, university, tags, compatible_exams, insights, price_credits, flashcard_quality_percent, flashcard_reviewer_count, created_at, updated_at, degree_slug'
 
 function documentStatus(visibility: CatalogRow['visibility']): DocumentStatus {
   if (visibility === 'rejected') return 'rejected'
@@ -208,6 +209,7 @@ function mapCatalogDocument(row: CatalogRow, uploader: string, ownerView = false
     previewKind,
     insights: row.insights ?? undefined,
     degreeCourse: row.degree_course ?? undefined,
+    degreeSlug: row.degree_slug ?? undefined,
     university: row.university ?? undefined,
     semester: row.semester ?? undefined,
     tags: row.tags ?? [],
@@ -264,7 +266,7 @@ export async function loadOwnedDocuments(userId: string): Promise<DocumentItem[]
   if (!supabase) return []
   const { data, error } = await supabase
     .from('documents')
-    .select('id, owner_id, title, course_name, professor, academic_year, page_count, language, preview_policy, description, exam_type, semester, degree_course, university, tags, compatible_exams, insights, price_credits, created_at, updated_at, visibility, original_size_bytes')
+    .select('id, owner_id, title, course_name, professor, academic_year, page_count, language, preview_policy, description, exam_type, semester, degree_course, degree_slug, university, tags, compatible_exams, insights, price_credits, created_at, updated_at, visibility, original_size_bytes')
     .eq('owner_id', userId)
     .order('created_at', { ascending: false })
   if (error) throw error

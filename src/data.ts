@@ -50,6 +50,8 @@ export type DocumentItem = {
   insights?: DocumentInsights
   // Metadati aggiuntivi raccolti nel form di upload (o ricavati dal catalogo).
   degreeCourse?: string
+  /** Canonical key from degree_programs.slug, used for cross-course filtering. */
+  degreeSlug?: string
   university?: string
   semester?: string
   tags?: string[]
