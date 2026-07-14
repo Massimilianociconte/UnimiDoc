@@ -3,7 +3,8 @@ import { drainStorageCleanupQueue } from '../server/pdf-pipeline/storage-gc.ts'
 
 // Drains public.storage_cleanup_queue: deletes the orphaned Storage objects left
 // behind by hard-deleted documents. Dry-run by default; pass --apply to remove.
-// Intended for manual/cron runs; the PDF worker also drains this queue on a loop.
+// Manual fallback: in production the scheduled `storage-gc` Edge Function
+// (pg_cron, every 10 min) is the primary drainer.
 
 const url = process.env.SUPABASE_URL?.trim()
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()

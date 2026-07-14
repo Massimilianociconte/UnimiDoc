@@ -21,9 +21,10 @@ export type StorageGcOptions = {
  * processed. Object removal is idempotent — a missing key is treated as done.
  *
  * The queue is RLS-locked (service-role only), so `supabase` MUST be a
- * service-role client. Safe to call repeatedly and concurrently with the PDF
- * pipeline; each row is processed at most `maxAttempts` times before being left
- * for manual inspection (its `last_error` is recorded).
+ * service-role client. Safe to call repeatedly; each row is processed at most
+ * `maxAttempts` times before being left for manual inspection (its `last_error`
+ * is recorded). Used by the `gc:storage` CLI script; in production the scheduled
+ * `storage-gc` Edge Function is the primary drainer.
  */
 export async function drainStorageCleanupQueue(
   supabase: SupabaseClient,

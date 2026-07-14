@@ -14,6 +14,11 @@ verify_jwt = false
 [functions.billing-webhook]
 verify_jwt = false
 
+# storage-gc authenticates itself (Bearer must equal the service-role key), so
+# platform JWT verification is disabled; it is invoked only by the pg_cron job.
+[functions.storage-gc]
+verify_jwt = false
+
 [api]
 enabled = true
 # Port to use for the API URL.
