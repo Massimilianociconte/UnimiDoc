@@ -1,14 +1,9 @@
-import { defineConfig } from 'vitest/config'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  test: {
-    // Solo unit test: gli spec in e2e/ sono Playwright e non devono essere
-    // raccolti da vitest (in CI fallirebbero con "test() called here").
-    include: ['src/**/*.test.{ts,tsx}', 'server/**/*.test.ts'],
-  },
   server: {
     // Rispetta la porta assegnata dall'ambiente (PORT), così i preview con
     // porta dinamica raggiungono il server anche quando la 5173 è occupata.
