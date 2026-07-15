@@ -12554,3 +12554,227 @@ button.dashboard-stat:hover {
     justify-content: flex-start;
   }
 }
+
+/* --- Recensioni documento --------------------------------------------------- */
+
+.document-reviews {
+  border: 1px solid rgba(22, 104, 69, 0.14);
+  border-radius: 14px;
+  background: #fff;
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.document-reviews-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.document-reviews-head h2 {
+  margin: 0;
+  font-size: 1.12rem;
+  color: var(--text-strong);
+}
+
+.document-reviews-average {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--primary);
+  font-size: 0.9rem;
+}
+
+.document-reviews-average.muted {
+  color: var(--text-soft);
+  font-weight: 500;
+}
+
+.document-review-stars {
+  display: flex;
+  gap: 4px;
+}
+
+.document-review-stars button {
+  border: 0;
+  background: transparent;
+  padding: 2px;
+  cursor: pointer;
+  color: rgba(22, 104, 69, 0.25);
+}
+
+.document-review-stars button.filled {
+  color: #e9a13b;
+}
+
+.document-review-form {
+  display: grid;
+  gap: 10px;
+}
+
+.document-review-form textarea,
+.document-report-form textarea {
+  width: 100%;
+  border: 1px solid rgba(22, 104, 69, 0.18);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+  resize: vertical;
+}
+
+.document-review-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.document-report-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.document-report-form {
+  display: grid;
+  gap: 8px;
+  border-top: 1px dashed rgba(22, 104, 69, 0.16);
+  padding-top: 10px;
+}
+
+.document-report-form select {
+  border: 1px solid rgba(22, 104, 69, 0.18);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.document-reviews-message {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.document-reviews-message.ok { color: var(--primary); }
+.document-reviews-message.error { color: #b3422f; }
+
+.document-reviews-note {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+}
+
+.document-reviews-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.document-reviews-list li {
+  border-top: 1px solid rgba(22, 104, 69, 0.08);
+  padding-top: 10px;
+}
+
+.document-review-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+}
+
+.document-review-rating {
+  color: rgba(22, 104, 69, 0.25);
+  display: inline-flex;
+  gap: 1px;
+}
+
+.document-review-rating .filled { color: #e9a13b; }
+
+.document-reviews-list p {
+  margin: 6px 0 0;
+  font-size: 0.92rem;
+  color: var(--text-strong);
+}
+
+/* --- Pannello moderazione ---------------------------------------------------- */
+
+.moderation-panel {
+  border: 1px solid rgba(179, 66, 47, 0.25);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #fffdfa, #fff7f4);
+  padding: 16px;
+  margin-bottom: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.moderation-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.moderation-head h2 { margin: 0; font-size: 1.05rem; }
+.moderation-head p { margin: 0; color: var(--text-soft); font-size: 0.85rem; }
+
+.moderation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.moderation-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  border: 1px solid rgba(22, 104, 69, 0.1);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.moderation-item-main strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.94rem;
+}
+
+.moderation-item-main small {
+  display: block;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+}
+
+.moderation-item-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.moderation-reject {
+  border: 1px solid rgba(179, 66, 47, 0.4);
+  color: #b3422f;
+  background: #fff;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}

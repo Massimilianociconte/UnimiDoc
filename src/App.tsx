@@ -20,6 +20,7 @@ import {
   Download,
   Eye,
   Filter,
+  Flag,
   GraduationCap,
   Gift,
   Highlighter,
@@ -231,6 +232,21 @@ import {
   emergingAuthors,
   sortByRanking,
 } from './lib/ranking'
+import {
+  checkIsModerator,
+  loadDocumentReviews,
+  loadModerationQueue,
+  loadModerationReports,
+  moderateDocument,
+  REPORT_REASONS,
+  reportDocument,
+  resolveModerationReport,
+  submitDocumentReview,
+  trackEvent,
+  type DocumentReview,
+  type ModerationQueueItem,
+  type ModerationReport,
+} from './lib/reviewsClient'
 import {
   loadNotificationPrefs,
   NOTIFICATION_CATEGORIES,
@@ -1320,6 +1336,7 @@ function DegreeCourseCatalog({
     let alive = true
     setCourses(null)
     setFailed(false)
+    trackEvent('degree_page_view', { degreeSlug: program.slug })
     loadDegreeCatalog(program.slug)
       .then((rows) => {
         if (alive) setCourses(rows)
@@ -1966,9 +1983,193 @@ function PublicProfilePage({
   )
 }
 
+/** id lato DB per i documenti del catalogo live (i demo non sono recensibili). */
+function liveDocumentId(doc: DocumentItem): string | null {
+  return doc.fileHash.startsWith('catalog-') ? doc.id : null
+}
+
+// Recensioni verificate (1-5) + segnalazione. Il gate è nel DB: recensisce
+// solo chi ha un acquisto attivo (o il materiale è gratuito), mai l'autore.
+function DocumentReviewsSection({ doc, isLoggedIn, onRoute }: { doc: DocumentItem; isLoggedIn: boolean; onRoute: (route: Route) => void }) {
+  const liveId = liveDocumentId(doc)
+  const [reviews, setReviews] = useState<DocumentReview[] | null>(null)
+  const [rating, setRating] = useState(0)
+  const [comment, setComment] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [reportReason, setReportReason] = useState<string>(REPORT_REASONS[0].value)
+  const [reportDetails, setReportDetails] = useState('')
+
+  useEffect(() => {
+    setReviews(null)
+    setMessage(null)
+    if (!liveId) return
+    let alive = true
+    loadDocumentReviews(liveId)
+      .then((rows) => {
+        if (alive) setReviews(rows)
+      })
+      .catch(() => {
+        if (alive) setReviews([])
+      })
+    return () => {
+      alive = false
+    }
+  }, [liveId])
+
+  if (!liveId) {
+    return (
+      <section className="document-reviews" aria-label="Recensioni">
+        <h2>Recensioni degli studenti</h2>
+        <p className="document-reviews-note">
+          Le recensioni verificate si attivano sui materiali pubblicati nel catalogo live: solo chi ha davvero
+          acquistato (o scaricato un materiale gratuito) può valutarlo.
+        </p>
+      </section>
+    )
+  }
+
+  const average = doc.serverRanking?.reviewAvg ?? (reviews?.length ? reviews.reduce((total, review) => total + review.rating, 0) / reviews.length : null)
+  const count = doc.serverRanking?.reviewCount ?? reviews?.length ?? 0
+  const mine = reviews?.find((review) => review.mine)
+
+  const send = async () => {
+    if (rating < 1) {
+      setMessage({ tone: 'error', text: 'Scegli un voto da 1 a 5 stelle.' })
+      return
+    }
+    setBusy(true)
+    setMessage(null)
+    try {
+      await submitDocumentReview(liveId, rating, comment)
+      setMessage({ tone: 'ok', text: 'Recensione salvata: grazie, aiuta gli altri studenti a scegliere.' })
+      setReviews(await loadDocumentReviews(liveId))
+    } catch (error) {
+      setMessage({ tone: 'error', text: error instanceof Error ? error.message : 'Recensione non salvata.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const sendReport = async () => {
+    setBusy(true)
+    setMessage(null)
+    try {
+      await reportDocument(liveId, reportReason, reportDetails)
+      setReportOpen(false)
+      setReportDetails('')
+      setMessage({ tone: 'ok', text: 'Segnalazione inviata alla moderazione. Grazie.' })
+    } catch (error) {
+      setMessage({ tone: 'error', text: error instanceof Error ? error.message : 'Segnalazione non inviata.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="document-reviews" aria-label="Recensioni">
+      <div className="document-reviews-head">
+        <h2>Recensioni degli studenti</h2>
+        {average != null && count > 0 ? (
+          <span className="document-reviews-average">
+            <Star size={15} /> {Number(average).toFixed(1)}/5 · {count} {count === 1 ? 'recensione' : 'recensioni'}
+          </span>
+        ) : (
+          <span className="document-reviews-average muted">Ancora nessuna recensione</span>
+        )}
+      </div>
+
+      {isLoggedIn ? (
+        <div className="document-review-form">
+          <div className="document-review-stars" role="radiogroup" aria-label="Voto da 1 a 5">
+            {[1, 2, 3, 4, 5].map((value) => (
+              <button
+                aria-checked={rating === value}
+                className={value <= rating ? 'filled' : ''}
+                key={value}
+                onClick={() => setRating(value)}
+                role="radio"
+                type="button"
+              >
+                <Star size={20} />
+              </button>
+            ))}
+          </div>
+          <textarea
+            maxLength={1200}
+            onChange={(event) => setComment(event.target.value)}
+            placeholder="Com’è questo materiale? Completezza, chiarezza, utilità per l’esame…"
+            rows={3}
+            value={comment}
+          />
+          <div className="document-review-actions">
+            <button className="primary-action" disabled={busy} onClick={() => void send()} type="button">
+              {mine ? 'Aggiorna recensione' : 'Pubblica recensione'}
+            </button>
+            <button className="document-report-toggle" disabled={busy} onClick={() => setReportOpen((open) => !open)} type="button">
+              <Flag size={14} /> Segnala materiale
+            </button>
+          </div>
+          {reportOpen ? (
+            <div className="document-report-form">
+              <select onChange={(event) => setReportReason(event.target.value)} value={reportReason}>
+                {REPORT_REASONS.map((reason) => (
+                  <option key={reason.value} value={reason.value}>{reason.label}</option>
+                ))}
+              </select>
+              <textarea
+                maxLength={2000}
+                onChange={(event) => setReportDetails(event.target.value)}
+                placeholder="Dettagli utili alla moderazione (facoltativo)"
+                rows={2}
+                value={reportDetails}
+              />
+              <button className="primary-action" disabled={busy} onClick={() => void sendReport()} type="button">
+                Invia segnalazione
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <p className="document-reviews-note">
+          <button className="auth-inline-link" onClick={() => onRoute('login')} type="button">Accedi</button>
+          {' '}per recensire: contano solo le valutazioni di chi ha davvero il materiale.
+        </p>
+      )}
+
+      {message ? <p className={`document-reviews-message ${message.tone}`} role="status">{message.text}</p> : null}
+
+      {reviews === null ? (
+        <p className="document-reviews-note">Carico le recensioni…</p>
+      ) : reviews.length ? (
+        <ul className="document-reviews-list">
+          {reviews.map((review) => (
+            <li key={review.id}>
+              <div className="document-review-meta">
+                <span className="document-review-rating">
+                  {[1, 2, 3, 4, 5].map((value) => (
+                    <Star className={value <= review.rating ? 'filled' : ''} key={value} size={13} />
+                  ))}
+                </span>
+                <small>
+                  {review.mine ? 'La tua recensione' : 'Studente verificato'} ·{' '}
+                  {new Date(review.createdAt).toLocaleDateString('it-IT')}
+                </small>
+              </div>
+              {review.comment ? <p>{review.comment}</p> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  )
+}
+
 function DocumentPage({
   document: doc,
   documents,
+  isLoggedIn,
   onDownload,
   onPreview,
   onRoute,
@@ -1977,12 +2178,19 @@ function DocumentPage({
 }: {
   document: DocumentItem | null
   documents: DocumentItem[]
+  isLoggedIn: boolean
   onDownload: (document: DocumentItem) => void
   onPreview: (document: DocumentItem) => void
   onRoute: (route: Route) => void
   onOpenDocument: (document: DocumentItem) => void
   onOpenProfile: (name: string, sellerId?: string) => void
 }) {
+  // Telemetria minima: apertura scheda (solo documenti live, nessun PII).
+  const openedLiveId = doc ? liveDocumentId(doc) : null
+  useEffect(() => {
+    if (openedLiveId) trackEvent('document_open', { documentId: openedLiveId })
+  }, [openedLiveId])
+
   if (!doc) {
     return (
       <main className="document-page section-wrap">
@@ -2134,6 +2342,8 @@ function DocumentPage({
         </p>
       </section>
 
+      <DocumentReviewsSection doc={doc} isLoggedIn={isLoggedIn} onRoute={onRoute} />
+
       {related.length ? (
         <section className="document-related">
           <h2>Altri appunti di {course?.shortName ?? doc.subject}</h2>
@@ -2240,6 +2450,14 @@ function AppHome({
       ),
     [activeSubject, activeProfessor, activeQuery, documentsForDegree],
   )
+
+  // Telemetria ricerca: registra query e ricerche a vuoto (segnale prodotto:
+  // materie richieste che non hanno ancora materiali).
+  useEffect(() => {
+    if (!activeQuery.trim()) return
+    trackEvent(visibleDocuments.length === 0 ? 'search_no_results' : 'search', { query: activeQuery })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al cambio query
+  }, [activeQuery])
 
   const advancedActive = activeProfessor !== 'Tutti'
   const selectedDegree = activeDegreeSlug === 'Tutti' ? null : findDegreeProgram(activeDegreeSlug) ?? null
@@ -6760,6 +6978,129 @@ function relativeDashboardTime(iso: string): string {
   return days === 1 ? 'ieri' : `${days} giorni fa`
 }
 
+// Pannello moderazione: visibile solo ai moderatori (gate autoritativo nelle
+// RPC SECURITY DEFINER; il check client serve solo a nascondere il pannello).
+// Coda dei documenti inviati (publish/reject con audit) + segnalazioni aperte.
+function ModerationPanel() {
+  const [isModerator, setIsModerator] = useState(false)
+  const [queue, setQueue] = useState<ModerationQueueItem[]>([])
+  const [reports, setReports] = useState<ModerationReport[]>([])
+  const [busyId, setBusyId] = useState('')
+  const [error, setError] = useState('')
+
+  const reload = async () => {
+    const [nextQueue, nextReports] = await Promise.all([loadModerationQueue(), loadModerationReports()])
+    setQueue(nextQueue)
+    setReports(nextReports)
+  }
+
+  useEffect(() => {
+    let alive = true
+    checkIsModerator()
+      .then(async (granted) => {
+        if (!alive || !granted) return
+        setIsModerator(true)
+        await reload()
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  if (!isModerator || (queue.length === 0 && reports.length === 0)) return null
+
+  const act = async (fn: () => Promise<void>, id: string) => {
+    setBusyId(id)
+    setError('')
+    try {
+      await fn()
+      await reload()
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : 'Azione non riuscita.')
+    } finally {
+      setBusyId('')
+    }
+  }
+
+  return (
+    <section className="moderation-panel" aria-label="Moderazione">
+      <div className="moderation-head">
+        <ShieldCheck size={18} />
+        <div>
+          <h2>Moderazione</h2>
+          <p>{queue.length} in coda di revisione · {reports.length} segnalazioni aperte</p>
+        </div>
+      </div>
+      {error ? <p className="document-reviews-message error" role="alert">{error}</p> : null}
+      {queue.length ? (
+        <ul className="moderation-list">
+          {queue.map((item) => (
+            <li key={item.documentId}>
+              <div className="moderation-item-main">
+                <strong>{item.title}</strong>
+                <small>
+                  {item.courseName}{item.professor ? ` · ${item.professor}` : ''} · {item.ownerEmail}
+                  {item.aiQuality != null ? ` · qualità AI ${Math.round(item.aiQuality * (item.aiQuality > 1 ? 1 : 100))}%` : ''}
+                  {item.openReports ? ` · ${item.openReports} segnalazioni` : ''}
+                </small>
+              </div>
+              <div className="moderation-item-actions">
+                <button
+                  className="primary-action"
+                  disabled={busyId === item.documentId}
+                  onClick={() => void act(() => moderateDocument(item.documentId, 'publish'), item.documentId)}
+                  type="button"
+                >
+                  Pubblica
+                </button>
+                <button
+                  className="moderation-reject"
+                  disabled={busyId === item.documentId}
+                  onClick={() => void act(() => moderateDocument(item.documentId, 'reject'), item.documentId)}
+                  type="button"
+                >
+                  Rifiuta
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {reports.length ? (
+        <ul className="moderation-list">
+          {reports.map((report) => (
+            <li key={report.reportId}>
+              <div className="moderation-item-main">
+                <strong><Flag size={13} /> {report.documentTitle}</strong>
+                <small>{report.reason}{report.details ? ` — ${report.details.slice(0, 120)}` : ''}</small>
+              </div>
+              <div className="moderation-item-actions">
+                <button
+                  className="primary-action"
+                  disabled={busyId === report.reportId}
+                  onClick={() => void act(() => resolveModerationReport(report.reportId, 'upheld'), report.reportId)}
+                  type="button"
+                >
+                  Accogli
+                </button>
+                <button
+                  className="moderation-reject"
+                  disabled={busyId === report.reportId}
+                  onClick={() => void act(() => resolveModerationReport(report.reportId, 'dismissed'), report.reportId)}
+                  type="button"
+                >
+                  Archivia
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  )
+}
+
 function UserDashboardPage({
   user,
   documents,
@@ -7116,6 +7457,7 @@ function UserDashboardPage({
 
       {activeView === 'overview' ? (
       <div className="dashboard-view view-overview">
+      <ModerationPanel />
       <section className="dashboard-focus-grid" aria-label="Azioni consigliate">
         <article className="dashboard-focus-card continue">
           <span className="dashboard-focus-icon"><BookOpen size={20} /></span>
@@ -9095,6 +9437,7 @@ function App() {
         <DocumentPage
           document={routeDocument}
           documents={visibleDocuments}
+          isLoggedIn={Boolean(authUser)}
           onDownload={handleDownload}
           onOpenDocument={openDocumentPage}
           onOpenProfile={openProfile}

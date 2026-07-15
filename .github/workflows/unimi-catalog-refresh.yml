@@ -1,0 +1,53 @@
+name: Refresh catalogo UniMi
+
+# Rigenera semestralmente (1 marzo / 1 settembre, dopo la pubblicazione dei
+# manifesti) il catalogo materie+docenti da unimi.it e apre una PR con i seed
+# aggiornati. L'applicazione al DB live resta un passo manuale documentato in
+# tools/unimi-catalog/README.md.
+on:
+  schedule:
+    - cron: '0 6 1 3,9 *'
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Estrai registro corsi dal seed
+        run: |
+          python3 - <<'PY'
+          import json, re
+          sql = open('supabase/migrations/20260712113000_degree_programs_registry_20260712.sql').read()
+          rows = re.findall(r"\('([a-z0-9-]+)', '((?:[^']|'')+)', '([^']+)', '((?:[^']|'')+)', '(/it/corsi/laurea-triennale/[^']+)'", sql)
+          programs = [{'slug': r[0], 'name': r[1].replace("''", "'"), 'classe': r[2], 'area': r[3].replace("''", "'"), 'unimi_path': r[4]} for r in rows]
+          json.dump(programs, open('tools/unimi-catalog/programs.json', 'w'), ensure_ascii=False)
+          print(len(programs), 'corsi')
+          PY
+      - name: Scrape piani di studio e docenti
+        working-directory: tools/unimi-catalog
+        run: python3 scraper.py
+      - name: Genera seed SQL
+        working-directory: tools/unimi-catalog
+        run: |
+          python3 gen_sql.py
+          rm -rf ../../supabase/seed/degree_catalog/0*.sql
+          cp sql/0*.sql ../../supabase/seed/degree_catalog/
+      - name: Apri PR con i seed aggiornati
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/unimi-catalog-refresh
+          commit-message: 'chore: refresh catalogo materie+docenti da unimi.it'
+          title: 'Refresh semestrale catalogo UniMi'
+          body: |
+            Rigenerazione automatica del catalogo insegnamenti+docenti da unimi.it
+            (`tools/unimi-catalog/scraper.py`). Verificare il diff dei seed e
+            applicare al DB live seguendo `tools/unimi-catalog/README.md`.
+          add-paths: |
+            supabase/seed/degree_catalog/*.sql
