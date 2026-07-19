@@ -103,6 +103,12 @@ function renderPage({ path, title, description, jsonLd, bodyHtml }) {
     `<meta property="og:type" content="website" />`,
     `<meta property="og:site_name" content="UnimiDoc" />`,
     `<meta property="og:locale" content="it_IT" />`,
+    `<meta property="og:image" content="${ORIGIN}/og-image.png" />`,
+    `<meta property="og:image:width" content="1200" />`,
+    `<meta property="og:image:height" content="630" />`,
+    `<meta name="twitter:card" content="summary_large_image" />`,
+    `<meta name="twitter:title" content="${esc(title)}" />`,
+    `<meta name="twitter:image" content="${ORIGIN}/og-image.png" />`,
     ...jsonLd.map((entry) => `<script type="application/ld+json">${JSON.stringify(entry)}</script>`),
   ].join('\n    ')
   html = html.replace('</head>', `    ${headExtra}\n  </head>`)
@@ -246,7 +252,12 @@ const staticRoutes = [
   { path: '/login', priority: '0.5', changefreq: 'monthly' },
   { path: '/privacy', priority: '0.4', changefreq: 'monthly' },
   { path: '/termini', priority: '0.4', changefreq: 'monthly' },
+  { path: '/cookie', priority: '0.4', changefreq: 'monthly' },
   { path: '/condizioni-di-vendita', priority: '0.4', changefreq: 'monthly' },
+  { path: '/rimborsi', priority: '0.4', changefreq: 'monthly' },
+  { path: '/condizioni-autori', priority: '0.4', changefreq: 'monthly' },
+  { path: '/regole-contenuti', priority: '0.4', changefreq: 'monthly' },
+  { path: '/ai-e-documenti', priority: '0.4', changefreq: 'monthly' },
   { path: '/copyright-segnalazioni', priority: '0.4', changefreq: 'monthly' },
 ]
 const urls = [

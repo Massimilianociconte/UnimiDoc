@@ -5,6 +5,11 @@
 -- Make sure italian text search configuration is usable (usually present)
 -- If not, 'simple' will be used as fallback inside the function.
 
+-- The previous 6-parameter version must be dropped first: CREATE OR REPLACE
+-- cannot change the return type (adds rank_score), and keeping both would
+-- leave an ambiguous overload for PostgREST RPC calls.
+drop function if exists public.match_rag_chunks(extensions.vector, text, text, int, uuid[], double precision);
+
 create or replace function public.match_rag_chunks(
   query_embedding extensions.vector(768),
   p_embedding_model text,
@@ -53,6 +58,12 @@ as $$
       and e.embedding_status = 'embedded'
       and c.is_active = true
       and c.processing_state = 'ready'
+      -- Autorizzazione: solo documenti accessibili al chiamante (stessa regola
+      -- della versione 6-parametri). Senza questo vincolo la funzione, essendo
+      -- SECURITY DEFINER, esporrebbe i chunk di qualsiasi documento.
+      and c.document_id in (
+        select ad.document_id from public.rag_accessible_document_ids(auth.uid()) ad
+      )
       and (filter_document_ids is null or c.document_id = any(filter_document_ids))
       and (1 - (e.embedding <=> query_embedding)) >= min_similarity
   ),

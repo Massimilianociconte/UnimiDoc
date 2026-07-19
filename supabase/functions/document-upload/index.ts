@@ -7,22 +7,41 @@
 //                      expensive SHA-256, magic-byte and qpdf verification.
 // Publication and credit rewards remain separate moderation operations.
 
-import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody, requireMethod, dbFailure} from '../_shared/http.ts'
 import { adminClient, requireUser, type AdminClient } from '../_shared/supabase.ts'
 import { UUID_RE, HASH_RE, DEGREE_SLUG_RE, DEFAULT_DEGREE_SLUG, MAX_UPLOADS_PER_HOUR, INITIAL_PIPELINE_STAGES, POST_PROCESSING_STAGES, safeName, parseTags } from '../_shared/constants.ts'
 import { createRequestLogger } from '../_shared/log.ts'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const PDF_PIPELINE_VERSION = (globalThis as { Deno?: { env?: { get(key: string): string | undefined } } }).Deno?.env?.get('PDF_PIPELINE_VERSION')?.trim() || 'pdf-worker-v1'
-// The PDF worker runs in production, so live uploads are enabled by default.
-// Set PDF_WORKER_ENABLED=false to pause new uploads (e.g. during worker
-// maintenance) — otherwise drafts would remain queued without a live consumer.
-//
-// FOLLOW THE RUNBOOK: docs/PDF_WORKER_RUNBOOK.md
-// - Keep PDF_PIPELINE_VERSION in sync between Edge and worker
-const PDF_WORKER_ENABLED = (globalThis as { Deno?: { env?: { get(key: string): string | undefined } } }).Deno?.env?.get('PDF_WORKER_ENABLED') !== 'false'
+// Fail-closed: uploads require an explicit opt-in after the PDF worker is
+// deployed and smoke-tested. See docs/PDF_WORKER_RUNBOOK.md.
+// Set PDF_WORKER_ENABLED=true only when a live container drains the queue.
+// Keep PDF_PIPELINE_VERSION in sync between Edge and worker.
+const PDF_WORKER_ENABLED = (globalThis as { Deno?: { env?: { get(key: string): string | undefined } } }).Deno?.env?.get('PDF_WORKER_ENABLED') === 'true'
 
 const clean = (value: unknown, fallback = '') => String(value ?? fallback).trim()
+
+/** Server-side public-field scan: block contact/off-platform leaks even if the client skips moderation. */
+function assertPublicTextClean(label: string, value: string) {
+  if (!value.trim()) return
+  const scan = value
+    .toLowerCase()
+    .replace(/\s*[([{]\s*(?:at|chiocciola)\s*[)\]}]\s*/g, '@')
+    .replace(/\s+(?:at|chiocciola)\s+/g, '@')
+    .replace(/\s*[([{]\s*(?:dot|punto)\s*[)\]}]\s*/g, '.')
+    .replace(/\s+(?:dot|punto)\s+/g, '.')
+  if (
+    /[a-z0-9][a-z0-9.+]*@[a-z0-9][a-z0-9.]*\.[a-z]{2,}/i.test(scan)
+    || /\b(?:https?:\/\/|www\.)\S+/i.test(scan)
+    || /\b(?:whats\s?app|telegram|insta(?:gram)?|face\s?book|tik\s?tok|discord)\b/i.test(scan)
+    || /\b(?:scrivimi|contattami|chiamami|contact\s+me|dm\s+me)\b/i.test(scan)
+  ) {
+    throw errors.badRequest(
+      `${label}: rimuovi contatti esterni (email, link, social). La comunicazione resta su UnimiDoc.`,
+    )
+  }
+}
 
 // Storage list is intentionally lightweight. Full-byte integrity verification
 // belongs to the native worker, not to the 256 MB / CPU-bounded Edge runtime.
@@ -34,7 +53,7 @@ async function assertUploadedObjectPresent(admin: AdminClient, bucket: string, o
     limit: 10,
     search: fileName,
   })
-  if (error) throw errors.badRequest(`Verifica presenza upload non riuscita: ${error.message}`)
+  if (error) throw dbFailure('db_error', error, 'Verifica presenza upload non riuscita')
   const object = (data ?? []).find((entry: { name?: string }) => entry.name === fileName)
   if (!object) throw errors.badRequest('Upload non ancora disponibile nello Storage.')
   const storedSize = Number((object as { metadata?: { size?: number } }).metadata?.size)
@@ -81,7 +100,7 @@ async function finalizeUpload(admin: AdminClient, userId: string, body: Record<s
     p_page_count: Number.isInteger(pageCount) && pageCount > 0 && pageCount <= 2000 ? pageCount : null,
     p_language: clean(body.language).slice(0, 12) || null,
   })
-  if (queueError) throw errors.badRequest(`Accodamento analisi non riuscito: ${queueError.message}`)
+  if (queueError) throw dbFailure('db_error', queueError, 'Accodamento analisi non riuscito')
   const queueResult = Array.isArray(queued) ? queued[0] : queued
   const runId = String(queueResult?.run_id ?? '')
   if (!UUID_RE.test(runId)) throw errors.badRequest('Run di elaborazione non creato.')
@@ -129,7 +148,7 @@ async function cancelUpload(admin: any, userId: string, body: Record<string, unk
     .eq('id', documentId)
     .eq('owner_id', userId)
     .eq('visibility', 'private')
-  if (deleteError) throw errors.badRequest(`Annullamento upload non riuscito: ${deleteError.message}`)
+  if (deleteError) throw dbFailure('db_error', deleteError, 'Annullamento upload non riuscito')
   return jsonResponse({ documentId, status: 'cancelled' }, 200, req)
 }
 
@@ -137,6 +156,8 @@ async function cancelUpload(admin: any, userId: string, body: Record<string, unk
   const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
+  const methodDenied = requireMethod(req, ['POST'])
+  if (methodDenied) return methodDenied
 
   logger.info('document_upload_request', { action: 'start' })
 
@@ -162,6 +183,8 @@ async function cancelUpload(admin: any, userId: string, body: Record<string, unk
 
     if (title.length < 3 || title.length > 180) throw errors.badRequest('Titolo non valido.')
     if (!courseName) throw errors.badRequest('Materia obbligatoria.')
+    assertPublicTextClean('Titolo', title)
+    assertPublicTextClean('Descrizione', clean(body.description).slice(0, 2000))
     if (!HASH_RE.test(originalFileSha256)) throw errors.badRequest('Hash SHA-256 non valido.')
     if (!Number.isFinite(originalSizeBytes) || originalSizeBytes <= 0 || originalSizeBytes > MAX_UPLOAD_BYTES) {
       throw errors.badRequest('Dimensione file non valida o superiore al limite.')
@@ -179,7 +202,7 @@ async function cancelUpload(admin: any, userId: string, body: Record<string, unk
       .select('slug, name, classe, is_active')
       .eq('slug', degreeSlug)
       .maybeSingle()
-    if (degreeError) throw errors.badRequest(`Verifica corso di laurea non riuscita: ${degreeError.message}`)
+    if (degreeError) throw dbFailure('db_error', degreeError, 'Verifica corso di laurea non riuscita')
     if (!degree || degree.is_active !== true) throw errors.badRequest('Corso di laurea sconosciuto o non più attivo.')
 
     const hourAgo = new Date(Date.now() - 3_600_000).toISOString()
@@ -196,7 +219,18 @@ async function cancelUpload(admin: any, userId: string, body: Record<string, unk
     let storagePath = `${userId}/incoming/${documentId}/${fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`}`
     let reusedDraft = false
     const tags = parseTags(body.tags)
-    const priceCredits = body.priceCredits == null ? null : Math.max(0, Math.min(250, Number(body.priceCredits) || 0))
+    // Price is optional at draft time. When set: free (0) or fair marketplace
+    // range [8, 250]. Values 1–7 undercut the catalog and are rejected.
+    let priceCredits: number | null = null
+    if (body.priceCredits != null) {
+      const parsed = Number(body.priceCredits)
+      if (!Number.isFinite(parsed)) throw errors.badRequest('Prezzo non valido.')
+      const rounded = Math.round(parsed)
+      if (rounded !== 0 && (rounded < 8 || rounded > 250)) {
+        throw errors.badRequest('Il prezzo deve essere 0 (gratuito) oppure tra 8 e 250 crediti.')
+      }
+      priceCredits = rounded
+    }
 
     const { error: insertError } = await admin.from('documents').insert({
       id: documentId,

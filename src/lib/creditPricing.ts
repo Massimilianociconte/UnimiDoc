@@ -232,17 +232,17 @@ export function tierLabel(tier: CreditTier): string {
   return TIER_LABEL[tier]
 }
 
-/** Can this balance unlock the document right now? */
-export function canUnlockWithBalance(doc: PricingInput, balance: number, sellerAsk?: number): boolean {
-  return balance >= documentCreditPrice(doc, sellerAsk)
+/** Can this balance unlock the document right now? Uses stored catalog price when set. */
+export function canUnlockWithBalance(doc: StoredPricingInput, balance: number): boolean {
+  return balance >= effectiveDocumentPrice(doc)
 }
 
 /**
  * Is the document within reach of the welcome-credits budget? Used to keep the
  * free trial focused on base/standard material (never premium/high-value docs).
  */
-export function isWithinWelcomeBudget(doc: PricingInput, sellerAsk?: number): boolean {
-  return documentCreditPrice(doc, sellerAsk) <= WELCOME_CREDITS
+export function isWithinWelcomeBudget(doc: StoredPricingInput): boolean {
+  return effectiveDocumentPrice(doc) <= WELCOME_CREDITS
 }
 
 /** Transparent per-component breakdown for a "why this price?" UI. */

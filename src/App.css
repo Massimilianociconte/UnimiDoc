@@ -11505,6 +11505,59 @@ button.dashboard-stat:hover {
 .legal-config-warning svg { flex: 0 0 auto; }
 .legal-config-warning p { margin: 5px 0 0; line-height: 1.5; }
 
+.legal-draft-badge {
+  display: inline-block;
+  margin-left: 12px;
+  padding: 3px 12px;
+  border: 1px solid #edc565;
+  border-radius: 999px;
+  background: #fff9e9;
+  color: #704e00;
+  font-size: 0.42em;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.auth-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.auth-consent input[type='checkbox'] {
+  flex: 0 0 auto;
+  margin-top: 3px;
+}
+
+.legal-consent-banner {
+  position: fixed;
+  inset: auto 16px 16px 16px;
+  z-index: 90;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 34px rgba(15, 42, 30, 0.18);
+}
+
+.legal-consent-banner p {
+  flex: 1 1 320px;
+  margin: 0;
+  line-height: 1.5;
+}
+
 .legal-operator-card {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

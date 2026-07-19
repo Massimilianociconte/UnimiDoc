@@ -15,7 +15,7 @@
 // workflow) may mutate the shared index. Buyers query the existing embeddings
 // through match_rag_chunks but can never rebuild somebody else's document.
 
-import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody, requireMethod, dbFailure} from '../_shared/http.ts'
 import { config } from '../_shared/env.ts'
 import {
   adminClient,
@@ -56,7 +56,7 @@ async function linkReviewedFlashcards(admin: AdminClient, documentId: string, ch
     .is('chunk_id', null)
     .not('source_page_start', 'is', null)
     .limit(300)
-  if (error) throw errors.badRequest(`Verifica provenienza flashcard non riuscita: ${error.message}`)
+  if (error) throw dbFailure('db_error', error, 'Verifica provenienza flashcard non riuscita')
 
   let linked = 0
   for (const card of cards ?? []) {
@@ -78,10 +78,17 @@ async function linkReviewedFlashcards(admin: AdminClient, documentId: string, ch
       })
       .eq('id', card.id)
       .is('chunk_id', null)
-    if (updateError) throw errors.badRequest(`Collegamento flashcard-chunk non riuscito: ${updateError.message}`)
+    if (updateError) throw dbFailure('db_error', updateError, 'Collegamento flashcard-chunk non riuscito')
     linked += 1
   }
   return linked
+}
+
+function timingSafeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length || a.length === 0) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
 }
 
 async function isTrustedPdfWorker(req: Request): Promise<boolean> {
@@ -89,13 +96,15 @@ async function isTrustedPdfWorker(req: Request): Promise<boolean> {
   const supplied = req.headers.get('x-unimidoc-worker-secret')?.trim() ?? ''
   if (expected.length < 32 || supplied.length < 32) return false
   const [expectedHash, suppliedHash] = await Promise.all([sha256Hex(expected), sha256Hex(supplied)])
-  return expectedHash === suppliedHash
+  return timingSafeEqualHex(expectedHash, suppliedHash)
 }
 
 // deno-lint-ignore no-explicit-any
 ;(globalThis as any).Deno.serve(async (req: Request) => {
   const pre = preflight(req)
   if (pre) return pre
+  const methodDenied = requireMethod(req, ['POST'])
+  if (methodDenied) return methodDenied
 
   const admin = adminClient()
   let jobId: string | null = null
@@ -121,7 +130,7 @@ async function isTrustedPdfWorker(req: Request): Promise<boolean> {
     // Authoritative access check (same rule as match_rag_chunks).
     if (!trustedWorker) {
       const { data: accessible, error: accessError } = await admin.rpc('rag_accessible_document_ids', { p_user: userId })
-      if (accessError) throw errors.badRequest(`Verifica accesso non riuscita: ${accessError.message}`)
+      if (accessError) throw dbFailure('db_error', accessError, 'Verifica accesso non riuscita')
       const hasAccess = (accessible ?? []).some((row: { document_id: string }) => row.document_id === documentId)
       if (!hasAccess) throw errors.paywall('Non hai accesso a questo documento.')
     }
@@ -209,7 +218,7 @@ async function isTrustedPdfWorker(req: Request): Promise<boolean> {
     jobId = String(claimedJobId)
     activeDocumentId = documentId
     const { error: statusError } = await admin.from('documents').update({ rag_status: 'processing' }).eq('id', documentId)
-    if (statusError) throw errors.badRequest(`Stato indicizzazione non aggiornato: ${statusError.message}`)
+    if (statusError) throw dbFailure('db_error', statusError, 'Stato indicizzazione non aggiornato')
 
     // 1) Ensure chunks exist. The native worker normally created the active
     // version already; the legacy fallback builds only from active persisted
@@ -265,7 +274,7 @@ async function isTrustedPdfWorker(req: Request): Promise<boolean> {
       const { error: insErr } = await admin
         .from('pdf_chunks')
         .upsert(rows, { onConflict: 'document_id,artifact_version,chunk_index' })
-      if (insErr) throw errors.badRequest(`Salvataggio chunk non riuscito: ${insErr.message}`)
+      if (insErr) throw dbFailure('db_error', insErr, 'Salvataggio chunk non riuscito')
 
       const { data: obsoleteChunks, error: obsoleteError } = await admin
         .from('pdf_chunks')
@@ -273,7 +282,7 @@ async function isTrustedPdfWorker(req: Request): Promise<boolean> {
         .eq('document_id', documentId)
         .eq('artifact_version', 'rag-index-legacy')
         .gte('chunk_index', rows.length)
-      if (obsoleteError) throw errors.badRequest(`Verifica chunk obsoleti non riuscita: ${obsoleteError.message}`)
+      if (obsoleteError) throw dbFailure('db_error', obsoleteError, 'Verifica chunk obsoleti non riuscita')
       const obsoleteIds = (obsoleteChunks ?? []).map((chunk: { id: string }) => chunk.id)
       if (obsoleteIds.length > 0) {
         const { error: obsoleteEmbeddingError } = await admin
@@ -281,13 +290,13 @@ async function isTrustedPdfWorker(req: Request): Promise<boolean> {
           .delete()
           .in('chunk_id', obsoleteIds)
         if (obsoleteEmbeddingError) {
-          throw errors.badRequest(`Rimozione embedding obsoleti non riuscita: ${obsoleteEmbeddingError.message}`)
+          throw dbFailure('db_error', obsoleteEmbeddingError, 'Rimozione embedding obsoleti non riuscita')
         }
         const { error: obsoleteChunkError } = await admin
           .from('pdf_chunks')
           .update({ processing_state: 'failed' })
           .in('id', obsoleteIds)
-        if (obsoleteChunkError) throw errors.badRequest(`Archiviazione chunk obsoleti non riuscita: ${obsoleteChunkError.message}`)
+        if (obsoleteChunkError) throw dbFailure('db_error', obsoleteChunkError, 'Archiviazione chunk obsoleti non riuscita')
       }
 
       const reloaded = await admin
@@ -359,7 +368,7 @@ async function isTrustedPdfWorker(req: Request): Promise<boolean> {
         const { error: reuseErr } = await admin
           .from('rag_chunk_embeddings')
           .upsert(reusableRows, { onConflict: 'chunk_id,embedding_model,embedding_version' })
-        if (reuseErr) throw errors.badRequest(`Riutilizzo embedding non riuscito: ${reuseErr.message}`)
+        if (reuseErr) throw dbFailure('db_error', reuseErr, 'Riutilizzo embedding non riuscito')
         embedded += reusableRows.length
         const reusedIds = new Set(reusableRows.map((row) => row.chunk_id))
         pending = pending.filter((chunk) => !reusedIds.has(chunk.id))
@@ -386,7 +395,7 @@ async function isTrustedPdfWorker(req: Request): Promise<boolean> {
       const { error: upErr } = await admin
         .from('rag_chunk_embeddings')
         .upsert(rows, { onConflict: 'chunk_id,embedding_model,embedding_version' })
-      if (upErr) throw errors.badRequest(`Salvataggio embedding non riuscito: ${upErr.message}`)
+      if (upErr) throw dbFailure('db_error', upErr, 'Salvataggio embedding non riuscito')
       embedded += batch.length
       await admin.from('rag_embedding_jobs').update({ chunks_embedded: embedded }).eq('id', jobId)
     }
@@ -438,7 +447,7 @@ async function finishJob(admin: AdminClient, jobId: string | null, documentId: s
       .from('rag_embedding_jobs')
       .update({ status, chunks_total: total, chunks_embedded: embedded, error_message: message, finished_at: new Date().toISOString() })
       .eq('id', jobId)
-    if (jobError) throw errors.badRequest(`Finalizzazione job RAG non riuscita: ${jobError.message}`)
+    if (jobError) throw dbFailure('db_error', jobError, 'Finalizzazione job RAG non riuscita')
   }
   const patch: Record<string, unknown> = { rag_status: docStatus, rag_chunk_count: embedded, rag_indexed_at: new Date().toISOString() }
   if (docStatus === 'indexed' || docStatus === 'partial') {
@@ -446,5 +455,5 @@ async function finishJob(admin: AdminClient, jobId: string | null, documentId: s
     patch.rag_index_version = (cur?.rag_index_version ?? 0) + 1
   }
   const { error: documentError } = await admin.from('documents').update(patch).eq('id', documentId)
-  if (documentError) throw errors.badRequest(`Finalizzazione documento RAG non riuscita: ${documentError.message}`)
+  if (documentError) throw dbFailure('db_error', documentError, 'Finalizzazione documento RAG non riuscita')
 }

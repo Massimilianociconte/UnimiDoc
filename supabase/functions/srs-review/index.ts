@@ -3,7 +3,7 @@
 // the server. Available to all authenticated users (SRS is a free feature).
 // Persists per-user, per-card SRS state + an answer-telemetry row.
 
-import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody, requireMethod, dbFailure} from '../_shared/http.ts'
 import { requireUser } from '../_shared/supabase.ts'
 import { calculateNextReview, type SrsRating, type AnswerStatus, type SrsState } from '../_shared/srs.ts'
 import { createRequestLogger } from '../_shared/log.ts'
@@ -22,6 +22,8 @@ function clampInt(value: unknown, max: number, fallback: number | null): number 
 ;(globalThis as any).Deno.serve(async (req: Request) => {
   const pre = preflight(req)
   if (pre) return pre
+  const methodDenied = requireMethod(req, ['POST'])
+  if (methodDenied) return methodDenied
 
   const logger = createRequestLogger(req)
   logger.info('srs_review_started')
@@ -45,7 +47,7 @@ function clampInt(value: unknown, max: number, fallback: number | null): number 
       .eq('owner_id', userId)
       .eq('flashcard_id', flashcardId)
       .maybeSingle()
-    if (existingError) throw errors.badRequest(`Stato SRS non disponibile: ${existingError.message}`)
+    if (existingError) throw dbFailure('db_error', existingError, 'Stato SRS non disponibile')
 
     const currentState: SrsState | null = existing
       ? {
@@ -88,7 +90,7 @@ function clampInt(value: unknown, max: number, fallback: number | null): number 
     })
     if (reviewError) {
       if (reviewError.code === '40001') throw errors.badRequest('La flashcard è stata aggiornata su un altro dispositivo. Riprova.')
-      throw errors.badRequest(`Impossibile salvare la revisione: ${reviewError.message}`)
+      throw dbFailure('db_error', reviewError, 'Impossibile salvare la revisione')
     }
 
     return jsonResponse({ srs: next }, 200, req)

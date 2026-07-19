@@ -9,8 +9,8 @@
 // future Flutter app can download packs and search offline; online answers
 // still go through rag-query so the server stays the source of truth.
 
-import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody } from '../_shared/http.ts'
-import { requireUser, adminClient, type AdminClient } from '../_shared/supabase.ts'
+import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody, requireMethod } from '../_shared/http.ts'
+import { requireUser, adminClient, enforceRateLimit, getEntitlement, type AdminClient } from '../_shared/supabase.ts'
 import { createRequestLogger } from '../_shared/log.ts'
 import { getEmbeddingProvider } from '../_shared/embeddings.ts'
 
@@ -20,6 +20,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
   const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
+  const methodDenied = requireMethod(req, ['POST'])
+  if (methodDenied) return methodDenied
 
   logger.info('rag_pack_start')
 
@@ -38,6 +40,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
     const allowed = new Set((accessible ?? []).map((r: { document_id: string }) => r.document_id))
     if (!allowed.has(documentId)) throw errors.paywall('Non hai accesso a questo documento.')
 
+    // Pack export is heavy (full embeddings). Cap downloads per month.
+    const entitlement = await getEntitlement(admin, userId)
+    await enforceRateLimit(admin, userId, 'rag_pack', entitlement.isPremium ? 60 : 12)
+
     const { data: doc } = await admin
       .from('documents')
       .select('id, title, course_name, professor, university, degree_course, rag_index_version')
@@ -45,7 +51,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
       .maybeSingle()
     if (!doc) throw new AppError(404, 'not_found', 'Documento non trovato.')
 
-    // Join embeddings -> chunks for this model+version.
+    // Join embeddings -> chunks for this model+version. Cap payload size.
+    const MAX_PACK_CHUNKS = entitlement.isPremium ? 800 : 250
     const { data: rows } = await admin
       .from('rag_chunk_embeddings')
       .select('chunk_id, embedding, content_hash, updated_at, pdf_chunks!inner(page_start, page_end, section_path, chunk_index, content)')
@@ -53,6 +60,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
       .eq('embedding_model', provider.embeddingModelId)
       .eq('embedding_version', provider.embeddingVersion)
       .eq('embedding_status', 'embedded')
+      .limit(MAX_PACK_CHUNKS)
 
     // deno-lint-ignore no-explicit-any
     const chunks = (rows ?? []).map((r: any) => {

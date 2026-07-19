@@ -262,6 +262,65 @@ export async function loadPublicDocumentCatalog(): Promise<DocumentItem[]> {
   })
 }
 
+export type CatalogSearchFilters = {
+  query?: string
+  course?: string
+  professor?: string
+  university?: string
+  degreeSlug?: string
+  academicYear?: string
+  seller?: string
+  examType?: string
+  sort?: 'relevance' | 'recent' | 'price_asc' | 'price_desc'
+  limit?: number
+  offset?: number
+}
+
+export type CatalogSearchResult = { items: DocumentItem[]; totalCount: number }
+
+/**
+ * Ricerca server-side del catalogo (Postgres full-text, config italiana) con
+ * filtri strutturati e paginazione stabile. Sostituisce progressivamente il
+ * filtro client di AppHome quando il catalogo cresce; la ricerca semantica
+ * resta su pgvector (RAG).
+ */
+export async function searchPublicCatalog(filters: CatalogSearchFilters): Promise<CatalogSearchResult> {
+  if (!supabase) return { items: [], totalCount: 0 }
+  const { data, error } = await supabase.rpc('search_documents', {
+    p_query: filters.query ?? null,
+    p_course: filters.course ?? null,
+    p_professor: filters.professor ?? null,
+    p_university: filters.university ?? null,
+    p_degree_slug: filters.degreeSlug ?? null,
+    p_academic_year: filters.academicYear ?? null,
+    p_seller: filters.seller ?? null,
+    p_exam_type: filters.examType ?? null,
+    p_sort: filters.sort ?? 'relevance',
+    p_limit: filters.limit ?? 24,
+    p_offset: filters.offset ?? 0,
+  })
+  if (error) throw error
+  const rows = (data ?? []) as Array<CatalogRow & { total_count: number }>
+  const sellerIds = [...new Set(rows.map((row) => row.seller_id).filter(Boolean))] as string[]
+  const sellerNames = new Map<string, string>()
+  if (sellerIds.length > 0) {
+    const { data: sellers } = await supabase
+      .from('public_seller_profiles')
+      .select('id, public_display_name')
+      .in('id', sellerIds)
+    for (const seller of (sellers ?? []) as Array<{ id: string; public_display_name: string }>) {
+      sellerNames.set(seller.id, seller.public_display_name)
+    }
+  }
+  return {
+    items: rows.map((row) => {
+      const publicName = row.seller_id ? sellerNames.get(row.seller_id) : undefined
+      return mapCatalogDocument(row, publicName ?? 'Profilo venditore privato', false, Boolean(publicName))
+    }),
+    totalCount: Number(rows[0]?.total_count ?? 0),
+  }
+}
+
 export async function loadOwnedDocuments(userId: string): Promise<DocumentItem[]> {
   if (!supabase) return []
   const { data, error } = await supabase

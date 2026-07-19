@@ -27,9 +27,17 @@ COPY scripts/reconcile-pdf-jobs.ts ./scripts/reconcile-pdf-jobs.ts
 COPY supabase/functions/_shared/chunking.ts ./supabase/functions/_shared/chunking.ts
 
 ENV NODE_ENV=production \
-    PDF_WORKER_TMP_DIR=/tmp/unimidoc-worker
+    PDF_WORKER_TMP_DIR=/tmp/unimidoc-worker \
+    PDF_WORKER_HEALTH_PORT=8080
 
 USER node
+
+EXPOSE 8080
+
+# The probe hits the in-process /healthz endpoint: it fails when the event
+# loop is wedged or the process is shutting down, not on individual job errors.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD ["node", "-e", "fetch(`http://127.0.0.1:${process.env.PDF_WORKER_HEALTH_PORT||8080}/healthz`).then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["npm", "run", "worker:pdf"]

@@ -9,8 +9,8 @@
 // itself is NOT used in the web app. Supabase remains the source of truth; the
 // manifest never lists documents the user cannot access.
 
-import { preflight, jsonResponse, errorResponse } from '../_shared/http.ts'
-import { requireUser, adminClient } from '../_shared/supabase.ts'
+import { preflight, jsonResponse, errorResponse, requireMethod} from '../_shared/http.ts'
+import { requireUser, adminClient, type AdminClient } from '../_shared/supabase.ts'
 import { createRequestLogger } from '../_shared/log.ts'
 import { getEmbeddingProvider } from '../_shared/embeddings.ts'
 
@@ -18,6 +18,8 @@ import { getEmbeddingProvider } from '../_shared/embeddings.ts'
   const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
+  const methodDenied = requireMethod(req, ['POST'])
+  if (methodDenied) return methodDenied
 
   logger.info('rag_manifest_start')
 

@@ -4,7 +4,7 @@
 // token usage + estimated cost. Never called by free users.
 
 import { config } from '../_shared/env.ts'
-import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody, requireMethod} from '../_shared/http.ts'
 import {
   adminClient,
   requireUser,
@@ -35,6 +35,8 @@ const PROMPT_VERSION: Record<AiHelpMode, string> = {
 ;(globalThis as any).Deno.serve(async (req: Request) => {
   const pre = preflight(req)
   if (pre) return pre
+  const methodDenied = requireMethod(req, ['POST'])
+  if (methodDenied) return methodDenied
 
   const logger = createRequestLogger(req)
   logger.info('ai_help_started')

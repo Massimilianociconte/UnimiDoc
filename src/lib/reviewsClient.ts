@@ -183,6 +183,15 @@ export type UsageEvent =
   | 'search'
   | 'search_no_results'
   | 'degree_page_view'
+  | 'signup_completed'
+  | 'upload_completed'
+  | 'document_purchased'
+  | 'flashcards_generated'
+  | 'study_session_completed'
+  | 'premium_conversion'
+  | 'ocr_used'
+  | 'rag_query_used'
+  | 'image_occlusion_used'
 
 export function trackEvent(
   event: UsageEvent,

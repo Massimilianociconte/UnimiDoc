@@ -547,12 +547,8 @@ async function loadRemoteDashboard(user: AppAuthUser, documents: DocumentItem[])
         .eq('owner_id', user.id)
         .order('updated_at', { ascending: false })
         .limit(500),
-      supabase
-        .from('flashcards')
-        .select('id, document_id, front, back, tags, difficulty, source_page_start, source_quote, subject, chapter_title, section_title, topic')
-        .neq('status', 'deleted')
-        .order('created_at', { ascending: false })
-        .limit(500),
+      // SECURITY DEFINER RPC: owner cards + cards on documents with active purchase.
+      supabase.rpc('list_accessible_flashcards', { p_limit: 500 }),
       supabase
         .from('flashcard_quality_votes')
         .select('flashcard_id, vote')

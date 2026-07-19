@@ -129,6 +129,7 @@ import {
   generatePremiumFlashcards as generateBackendPremiumFlashcards,
   generatePremiumOutline,
   requestAiHelp,
+  requestDocumentAccess,
   saveReviewedFlashcards,
   setAccessTokenProvider,
   submitSrsReview,
@@ -263,14 +264,27 @@ import {
   requestAccountErasure,
   type PrivacyRequest,
 } from './lib/privacyClient'
-import type { LegalRoute } from './legalContent'
+import { LEGAL_VERSION } from './legalContent'
+import {
+  authModeFromRoute,
+  isLegalRoute,
+  nextPathAfterAuth,
+  routeFromPathname,
+  routePaths,
+  routeSeo,
+  type AuthMode,
+  type Route,
+} from './routing'
+import {
+  flushPendingLegalAcceptance,
+  hasAcceptedCurrentLegalVersion,
+  recordLegalAcceptance,
+  storePendingLegalAcceptance,
+} from './lib/legalConsent'
 
 const BillingPlans = lazy(() => import('./components/BillingPlans').then((module) => ({ default: module.BillingPlans })))
 const LegalPage = lazy(() => import('./components/LegalPage').then((module) => ({ default: module.LegalPage })))
 const SellerPayoutPanel = lazy(() => import('./components/SellerPayoutPanel').then((module) => ({ default: module.SellerPayoutPanel })))
-
-type Route = 'landing' | 'login' | 'signup' | 'app' | 'premium' | 'upload' | 'library' | 'dashboard' | 'settings' | 'document' | 'profile' | 'degrees' | 'degree' | LegalRoute
-type AuthMode = 'login' | 'signup'
 type AuthProvider = 'email' | 'google'
 
 type AuthFormValues = {
@@ -279,6 +293,7 @@ type AuthFormValues = {
   fullName: string
   remember: boolean
   provider: AuthProvider
+  acceptedTerms: boolean
 }
 
 // Premium AI Edge Functions authenticate with the live Supabase JWT.
@@ -422,106 +437,6 @@ const premiumBenefits = [
   'Download senza attese quando hai poco tempo',
   'Una libreria ordinata dei materiali migliori',
 ]
-
-const routePaths: Record<Route, string> = {
-  landing: '/',
-  login: '/login',
-  signup: '/signup',
-  app: '/app',
-  premium: '/premium',
-  upload: '/upload',
-  library: '/library',
-  dashboard: '/dashboard',
-  settings: '/impostazioni',
-  document: '/appunti',
-  profile: '/autore',
-  degrees: '/corsi',
-  degree: '/corsi',
-  privacy: '/privacy',
-  terms: '/termini',
-  cookies: '/cookie',
-  sales: '/condizioni-di-vendita',
-  copyright: '/copyright-segnalazioni',
-}
-
-const routeSeo: Record<Route, { title: string; description: string }> = {
-  landing: {
-    title: 'UnimiDoc - Appunti verificati per la Statale di Milano',
-    description: 'Trova appunti verificati per i corsi dell’Università degli Studi di Milano.',
-  },
-  login: {
-    title: 'Accedi a UnimiDoc',
-    description: 'Accedi alla tua libreria UnimiDoc, salva appunti e continua a studiare dai tuoi documenti.',
-  },
-  signup: {
-    title: 'Crea account UnimiDoc',
-    description: 'Crea il tuo account UnimiDoc per salvare appunti, guadagnare crediti e preparare gli esami.',
-  },
-  app: {
-    title: 'Esplora gli appunti della Statale - UnimiDoc',
-    description: 'Cerca documenti, appunti e materiali per corso di laurea, esame o docente alla Statale di Milano.',
-  },
-  premium: {
-    title: 'Premium UnimiDoc',
-    description: 'Scopri UnimiDoc Premium: anteprime complete, ricerca avanzata e download senza attese.',
-  },
-  upload: {
-    title: 'Carica appunti - UnimiDoc',
-    description: 'Carica i tuoi appunti, genera flashcard e contribuisci alla community UnimiDoc.',
-  },
-  library: {
-    title: 'La tua libreria - UnimiDoc',
-    description: 'Ritrova documenti salvati, crediti e materiali recenti nella tua libreria UnimiDoc.',
-  },
-  dashboard: {
-    title: 'Dashboard personale - UnimiDoc',
-    description: 'Gestisci profilo, crediti, documenti, flashcard, quiz e progressi nella dashboard UnimiDoc.',
-  },
-  settings: {
-    title: 'Impostazioni account - UnimiDoc',
-    description: 'Gestisci profilo, notifiche, crediti e preferenze del tuo account UnimiDoc.',
-  },
-  // Fallback: le schede documento reali sovrascrivono titolo e descrizione
-  // con i metadati specifici del file (vedi effetto SEO in App).
-  document: {
-    title: 'Appunti verificati - UnimiDoc',
-    description: 'Scheda documento con anteprima, valutazioni e dettagli per gli esami della Statale di Milano.',
-  },
-  profile: {
-    title: 'Profilo autore - UnimiDoc',
-    description: 'Profilo pubblico di un autore UnimiDoc: materiali, valutazioni, vendite e affidabilità alla Statale di Milano.',
-  },
-  degrees: {
-    title: 'Corsi di laurea triennale e a ciclo unico della Statale di Milano - UnimiDoc',
-    description:
-      'Tutti i corsi di laurea triennale e magistrale a ciclo unico dell’Università degli Studi di Milano su UnimiDoc: trova o carica appunti per il tuo corso, da Medicina e Giurisprudenza alla biologia, all’informatica e alle professioni sanitarie.',
-  },
-  degree: {
-    title: 'Appunti per corso di laurea - UnimiDoc',
-    description: 'Appunti, dispense ed esercizi per i corsi di laurea triennale e magistrale a ciclo unico della Statale di Milano.',
-  },
-  privacy: {
-    title: 'Informativa privacy - UnimiDoc',
-    description: 'Come UnimiDoc tratta dati account, materiali, studio e transazioni.',
-  },
-  terms: {
-    title: 'Termini di utilizzo - UnimiDoc',
-    description: 'Regole del servizio, account, contenuti e strumenti di studio UnimiDoc.',
-  },
-  cookies: {
-    title: 'Cookie e tecnologie locali - UnimiDoc',
-    description: 'Tecnologie necessarie, preferenze e criteri per eventuali strumenti facoltativi.',
-  },
-  sales: {
-    title: 'Condizioni di vendita, crediti e rimborsi - UnimiDoc',
-    description: 'Regole economiche per ricariche, Premium, contenuti digitali e venditori.',
-  },
-  copyright: {
-    title: 'Copyright e segnalazioni - UnimiDoc',
-    description: 'Come segnalare contenuti che violano diritti o contengono dati non autorizzati.',
-  },
-}
-
 const demoDocument = {
   title: 'Citologia e istologia - Demo interattiva',
   subject: 'Citologia e istologia',
@@ -548,35 +463,6 @@ const demoPageImages = [
     alt: 'Pagina demo protetta su trascrizione del DNA',
   },
 ]
-
-function routeFromPathname(pathname: string): Route {
-  if (pathname === '/login') return 'login'
-  if (pathname === '/signup') return 'signup'
-  if (pathname === '/app' || pathname === '/esplora' || pathname === '/appunti') return 'app'
-  if (pathname === '/premium' || pathname === '/pricing') return 'premium'
-  if (pathname === '/upload' || pathname === '/carica') return 'upload'
-  if (pathname === '/dashboard' || pathname === '/area-riservata') return 'dashboard'
-  if (pathname === '/library' || pathname === '/libreria') return 'library'
-  if (pathname === '/impostazioni' || pathname === '/settings') return 'settings'
-  if (pathname === '/privacy' || pathname === '/privacy-policy') return 'privacy'
-  if (pathname === '/termini' || pathname === '/terms') return 'terms'
-  if (pathname === '/cookie' || pathname === '/cookie-policy') return 'cookies'
-  if (pathname === '/condizioni-di-vendita' || pathname === '/rimborsi') return 'sales'
-  if (pathname === '/copyright-segnalazioni' || pathname === '/segnalazioni') return 'copyright'
-  if (pathname.startsWith('/appunti/')) return 'document'
-  if (pathname.startsWith('/autore/')) return 'profile'
-  if (pathname === '/corsi' || pathname === '/corsi-di-laurea') return 'degrees'
-  if (pathname.startsWith('/corsi/')) return 'degree'
-  return 'landing'
-}
-
-function authModeFromRoute(route: Route): AuthMode {
-  return route === 'signup' ? 'signup' : 'login'
-}
-
-function isLegalRoute(route: Route): route is LegalRoute {
-  return route === 'privacy' || route === 'terms' || route === 'cookies' || route === 'sales' || route === 'copyright'
-}
 
 function subjectFromSearch() {
   if (typeof window === 'undefined') return 'Tutti'
@@ -624,15 +510,6 @@ function makeDemoAuthUser(values: AuthFormValues): AppAuthUser {
     name,
     isDemo: true,
   }
-}
-
-function nextRouteAfterAuth() {
-  if (typeof window === 'undefined') return 'dashboard' as Route
-  const nextPath = new URLSearchParams(window.location.search).get('next')
-  if (!nextPath) return 'dashboard' as Route
-
-  const nextRoute = routeFromPathname(nextPath)
-  return nextRoute === 'login' || nextRoute === 'signup' ? 'dashboard' : nextRoute
 }
 
 function useRotatingCourseName() {
@@ -736,7 +613,11 @@ function SiteFooter({
           <button onClick={() => onRoute('privacy')} type="button">Privacy</button>
           <button onClick={() => onRoute('terms')} type="button">Termini</button>
           <button onClick={() => onRoute('cookies')} type="button">Cookie</button>
-          <button onClick={() => onRoute('sales')} type="button">Vendite e rimborsi</button>
+          <button onClick={() => onRoute('sales')} type="button">Acquisti e crediti</button>
+          <button onClick={() => onRoute('refunds')} type="button">Rimborsi e recesso</button>
+          <button onClick={() => onRoute('authors')} type="button">Autori e venditori</button>
+          <button onClick={() => onRoute('content')} type="button">Regole sui contenuti</button>
+          <button onClick={() => onRoute('ai')} type="button">AI e documenti</button>
           <button onClick={() => onRoute('copyright')} type="button">Segnalazioni</button>
         </nav>
       </div>
@@ -1058,6 +939,13 @@ function DemoDocumentCard({ onOpen }: { onOpen: () => void }) {
 }
 
 function DemoDocumentModal({ onClose, onPremium }: { onClose: () => void; onPremium: () => void }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
   useBodyScrollLock()
 
   return (
@@ -2170,6 +2058,7 @@ function DocumentPage({
   document: doc,
   documents,
   isLoggedIn,
+  catalogLoading = false,
   onDownload,
   onPreview,
   onRoute,
@@ -2179,6 +2068,7 @@ function DocumentPage({
   document: DocumentItem | null
   documents: DocumentItem[]
   isLoggedIn: boolean
+  catalogLoading?: boolean
   onDownload: (document: DocumentItem) => void
   onPreview: (document: DocumentItem) => void
   onRoute: (route: Route) => void
@@ -2190,6 +2080,17 @@ function DocumentPage({
   useEffect(() => {
     if (openedLiveId) trackEvent('document_open', { documentId: openedLiveId })
   }, [openedLiveId])
+
+  if (!doc && catalogLoading) {
+    return (
+      <main className="document-page section-wrap">
+        <section className="document-missing document-loading" aria-busy="true">
+          <h1>Caricamento documento…</h1>
+          <p>Stiamo recuperando la scheda dal catalogo.</p>
+        </section>
+      </main>
+    )
+  }
 
   if (!doc) {
     return (
@@ -2402,6 +2303,7 @@ function AppHome({
   const [activeProfessor, setActiveProfessor] = useState('Tutti')
   const [activeQuery, setActiveQuery] = useState(initialQuery)
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const [catalogLimit, setCatalogLimit] = useState(6)
   useEffect(() => {
     if (initialSubject) {
       setActiveSubject(initialSubject)
@@ -2620,7 +2522,13 @@ function AppHome({
         <div className="notes-area">
           <div className="section-title">
             <h2>{activeQuery ? `Risultati per “${activeQuery}”` : 'Documenti popolari'}</h2>
-            <button type="button">Vedi tutti</button>
+            {visibleDocuments.length > catalogLimit ? (
+              <button type="button" onClick={() => setCatalogLimit((value) => value + 12)}>
+                Vedi tutti ({visibleDocuments.length})
+              </button>
+            ) : visibleDocuments.length > 6 ? (
+              <button type="button" onClick={() => setCatalogLimit(6)}>Mostra meno</button>
+            ) : null}
           </div>
           {activeQuery ? (
             <div className="active-query-pill">
@@ -2631,7 +2539,7 @@ function AppHome({
           ) : null}
           {visibleDocuments.length ? (
             <div className="notes-grid">
-              {visibleDocuments.slice(0, 6).map((document) => (
+              {visibleDocuments.slice(0, catalogLimit).map((document) => (
                 <DocumentCard document={document} key={document.id} onDownload={onDownload} onOpenPage={onOpenDocument} onPreview={onPreview} />
               ))}
             </div>
@@ -2735,6 +2643,14 @@ function PreviewModal({
 }) {
   useBodyScrollLock()
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   const course = findCourse(document.subject)
 
   return (
@@ -2785,6 +2701,7 @@ function LoginPage({
   const [password, setPassword] = useState(isSupabaseConfigured ? '' : 'unimidoc-demo')
   const [fullName, setFullName] = useState(isSupabaseConfigured ? '' : 'Giulia Bianchi')
   const [remember, setRemember] = useState(true)
+  const [acceptTerms, setAcceptTerms] = useState(false)
   const [submitting, setSubmitting] = useState<AuthProvider | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -2824,6 +2741,11 @@ function LoginPage({
       }
     }
 
+    if (mode === 'signup' && !acceptTerms) {
+      setError('Per creare l’account devi accettare Termini e condizioni e informativa privacy.')
+      return
+    }
+
     setSubmitting(provider)
     try {
       await onSubmit({
@@ -2832,6 +2754,7 @@ function LoginPage({
         fullName,
         remember,
         provider,
+        acceptedTerms: mode === 'signup' && acceptTerms,
       })
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Accesso non riuscito. Riprova tra poco.')
@@ -2903,6 +2826,42 @@ function LoginPage({
             </label>
             <button type="button" onClick={() => void handleForgotPassword()}>Hai dimenticato la password?</button>
           </div>
+          {mode === 'signup' ? (
+            <label className="auth-consent">
+              <input
+                checked={acceptTerms}
+                onChange={(event) => setAcceptTerms(event.target.checked)}
+                type="checkbox"
+              />
+              <span>
+                Accetto i{' '}
+                <button
+                  className="auth-inline-link"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onRoute('terms')
+                  }}
+                  type="button"
+                >
+                  Termini e condizioni
+                </button>
+                {' '}e l’
+                <button
+                  className="auth-inline-link"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onRoute('privacy')
+                  }}
+                  type="button"
+                >
+                  informativa privacy
+                </button>
+                {' '}(versione {LEGAL_VERSION}).
+              </span>
+            </label>
+          ) : null}
           {error ? <p className="auth-error" role="alert">{error}</p> : null}
           {notice ? <p className="auth-notice" role="status">{notice}</p> : null}
           <button className="auth-submit" disabled={submitting !== null} type="submit">
@@ -3797,17 +3756,24 @@ function FlashcardStudyModal({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'ArrowRight') setIndex((value) => Math.min(cards.length - 1, value + 1))
-      else if (event.key === 'ArrowLeft') setIndex((value) => Math.max(0, value - 1))
+      const target = event.target as HTMLElement | null
+      const typing =
+        target
+        && (target.tagName === 'INPUT'
+          || target.tagName === 'TEXTAREA'
+          || target.tagName === 'SELECT'
+          || target.isContentEditable)
+      if (event.key === 'ArrowRight' && !typing) setIndex((value) => Math.min(cards.length - 1, value + 1))
+      else if (event.key === 'ArrowLeft' && !typing) setIndex((value) => Math.max(0, value - 1))
       else if (event.key === 'Escape') onClose()
-      else if (event.key === ' ') {
+      else if (event.key === ' ' && !typing && answerMode === 'flashcard') {
         event.preventDefault()
         setRevealed((value) => !value)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [cards.length, onClose])
+  }, [answerMode, cards.length, onClose])
 
   if (!current) return null
 
@@ -5437,8 +5403,9 @@ function UploadPage({
   user: AppAuthUser | null
 }) {
   // Live document upload is enabled by default now that the PDF worker runs in
-  // production. Set VITE_DOCUMENT_UPLOAD_ENABLED=false to disable (e.g. staging).
-  const remoteUploadEnabled = import.meta.env.VITE_DOCUMENT_UPLOAD_ENABLED !== 'false'
+  // Fail-closed: live upload UI only when explicitly enabled after worker smoke.
+  // Set VITE_DOCUMENT_UPLOAD_ENABLED=true in Netlify after PDF worker is live.
+  const remoteUploadEnabled = import.meta.env.VITE_DOCUMENT_UPLOAD_ENABLED === 'true'
   const draftOwnerId = user?.id ?? 'anonymous'
   const [restoredDraft, setRestoredDraft] = useState<UploadReaderDraft | null>(() => loadUploadReaderDraft(draftOwnerId))
   const [file, setFile] = useState<File | null>(null)
@@ -5924,7 +5891,9 @@ function UploadPage({
 
   const changeMode = (nextPremium: boolean) => {
     setPremium(nextPremium)
-    setPremiumState(nextPremium)
+    // Live Supabase: entitlement is server-authoritative. Never write a spoofable
+    // local premium flag that would unlock client AI gates before a 402.
+    if (!isSupabaseConfigured) setPremiumState(nextPremium)
     if (analysis && doFlashcards) {
       if (!nextPremium) {
         skipFreeFlashcards()
@@ -6149,6 +6118,7 @@ function UploadPage({
           : 'notes',
       insights: insights ?? undefined,
       degreeCourse: degreeCourseLabel(degreeProgram),
+      degreeSlug,
       university: UNIVERSITY_NAME,
       semester: semester || undefined,
       tags: tagsInput
@@ -6469,7 +6439,7 @@ function UploadPage({
             <div className="free-study-tools-grid">
               <FreeStudyToolsPanel
                 analysis={analysis}
-                onPremium={() => changeMode(true)}
+                onPremium={() => (isSupabaseConfigured ? onRoute('premium') : changeMode(true))}
                 storageKey={freeReaderStorageKey}
                 title={freeReaderTitle}
               />
@@ -8884,18 +8854,22 @@ function App() {
     initialRoute === 'degree' ? findDegreeByPath(window.location.pathname) : null,
   )
   const [authMode, setAuthMode] = useState<AuthMode>(authModeFromRoute(initialRoute))
-  const [authUser, setAuthUser] = useState<AppAuthUser | null>(() => loadStoredDemoUser())
+  const [authUser, setAuthUser] = useState<AppAuthUser | null>(() =>
+    isSupabaseConfigured ? null : loadStoredDemoUser(),
+  )
   const [credits, setCredits] = useState(() => (isSupabaseConfigured ? 0 : 120))
   const [walletState, setWalletState] = useState<WalletState | null>(null)
   const [purchaseModal, setPurchaseModal] = useState<{ item: PurchasedItem; document: DocumentItem } | null>(null)
   const [purchasePendingId, setPurchasePendingId] = useState<string | null>(null)
   const [uploads, setUploads] = useState<DocumentItem[]>([])
   const [liveCatalog, setLiveCatalog] = useState<DocumentItem[]>([])
+  const [catalogReady, setCatalogReady] = useState(!isSupabaseConfigured)
   const [initialSubject, setInitialSubject] = useState(subjectFromSearch)
   const [initialQuery, setInitialQuery] = useState(queryFromSearch)
   const [previewDocument, setPreviewDocument] = useState<DocumentItem | null>(null)
   const [demoOpen, setDemoOpen] = useState(false)
   const [toast, setToast] = useState('')
+  const [legalAcceptanceNeeded, setLegalAcceptanceNeeded] = useState(false)
   const previousRouteRef = useRef<Route>(initialRoute)
   // Until the initial Supabase session check resolves we must not run the private
   // route guard, otherwise a refresh on /dashboard bounces a valid session to login.
@@ -8953,7 +8927,7 @@ function App() {
     const listener = () => navigateRoute('landing')
     window.addEventListener('go-home', listener)
     return () => window.removeEventListener('go-home', listener)
-  })
+  }, [])
 
   useEffect(() => {
     const onPopState = () => {
@@ -8973,14 +8947,24 @@ function App() {
   }, [visibleDocuments])
 
   useEffect(() => {
-    if (!isSupabaseConfigured || authUser?.isDemo) return
+    if (!isSupabaseConfigured || authUser?.isDemo) {
+      setCatalogReady(true)
+      return
+    }
     let active = true
+    setCatalogReady(false)
     void loadPublicDocumentCatalog()
       .then((documents) => {
-        if (active) setLiveCatalog(documents)
+        if (active) {
+          setLiveCatalog(documents)
+          setCatalogReady(true)
+        }
       })
       .catch(() => {
-        if (active) setLiveCatalog([])
+        if (active) {
+          setLiveCatalog([])
+          setCatalogReady(true)
+        }
       })
     return () => {
       active = false
@@ -9077,9 +9061,11 @@ function App() {
     setMetaTag('name', 'twitter:title', title)
     setMetaTag('name', 'twitter:description', descriptionText)
 
-    // Uno slug corso sconosciuto renderizza un fallback "non trovato": senza
-    // noindex Google lo tratterebbe come soft-404 indicizzabile.
-    const isNotFoundPage = route === 'degree' && !routeDegree
+    // Soft-404 (corso/documento/profilo assenti dopo il load): noindex.
+    const isNotFoundPage =
+      (route === 'degree' && !routeDegree)
+      || (route === 'document' && catalogReady && !routeDocument)
+      || (route === 'profile' && catalogReady && !routeProfile)
     setMetaTag('name', 'robots', isNotFoundPage ? 'noindex, follow' : 'index, follow, max-image-preview:large, max-snippet:-1')
 
     if (isDocPage) {
@@ -9116,7 +9102,7 @@ function App() {
     } else {
       setJsonLd('degree', null)
     }
-  }, [route, routeDocument, routeProfile, routeDegree, visibleDocuments])
+  }, [route, routeDocument, routeProfile, routeDegree, visibleDocuments, catalogReady])
 
   const notify = (message: string) => {
     setToast(message)
@@ -9129,10 +9115,16 @@ function App() {
     let active = true
     void getSupabaseSessionUser()
       .then((user) => {
-        if (active) setAuthUser(user)
+        if (!active) return
+        setAuthUser(user)
+        // Live auth configured: never keep a leftover demo session in storage.
+        storeDemoUser(null)
       })
       .catch(() => {
-        if (active) setAuthUser(null)
+        if (active) {
+          setAuthUser(null)
+          storeDemoUser(null)
+        }
       })
       .finally(() => {
         if (active) setAuthReady(true)
@@ -9140,7 +9132,7 @@ function App() {
 
     const unsubscribe = subscribeSupabaseAuth((user) => {
       setAuthUser(user)
-      if (user) storeDemoUser(null)
+      storeDemoUser(null)
     })
 
     return () => {
@@ -9197,6 +9189,42 @@ function App() {
     })
   }
 
+  // Consenso legale versionato: registra l'accettazione parcheggiata al
+  // signup e mostra il promemoria quando manca la versione corrente.
+  useEffect(() => {
+    if (!authUserId || authUserIsDemo || !isSupabaseConfigured) {
+      setLegalAcceptanceNeeded(false)
+      return undefined
+    }
+    let active = true
+    void (async () => {
+      try {
+        await flushPendingLegalAcceptance()
+      } catch {
+        // Il pending resta in storage: riproveremo alla prossima sessione.
+      }
+      try {
+        const accepted = await hasAcceptedCurrentLegalVersion()
+        if (active) setLegalAcceptanceNeeded(!accepted)
+      } catch {
+        // Stato non verificabile ora: non bloccare l'app per questo.
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [authUserId, authUserIsDemo])
+
+  const acceptCurrentLegalTerms = async () => {
+    try {
+      await recordLegalAcceptance()
+      setLegalAcceptanceNeeded(false)
+      notify('Accettazione registrata. Buono studio!')
+    } catch {
+      notify('Non riesco a registrare l’accettazione ora. Riprova tra poco.')
+    }
+  }
+
   const exploreSubject = (value: string) => {
     const course = findCourse(value)
     setInitialSubject(course?.name ?? 'Tutti')
@@ -9216,9 +9244,30 @@ function App() {
     navigateRoute('app', { search: `?q=${encodeURIComponent(query)}` })
   }
 
+  const resumeAfterAuth = (path: string) => {
+    const nextRoute = routeFromPathname(path)
+    setRoute(nextRoute)
+    setRouteDocument(nextRoute === 'document' ? findDocumentByPath(path, visibleDocuments) : null)
+    setRouteProfile(nextRoute === 'profile' ? findUploaderBySlug(path, visibleDocuments) : null)
+    setRouteDegree(nextRoute === 'degree' ? findDegreeByPath(path) : null)
+    setAuthMode(authModeFromRoute(nextRoute))
+    if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== path) {
+      window.history.replaceState({ route: nextRoute }, '', path)
+    }
+  }
+
   const completeLogin = async (values: AuthFormValues) => {
+    // L'accettazione espressa al signup viene parcheggiata prima di qualsiasi
+    // redirect (OAuth) o attesa di conferma email, e registrata lato server
+    // appena esiste una sessione (vedi effetto legal consent).
+    if (authMode === 'signup' && values.acceptedTerms && isSupabaseConfigured) {
+      storePendingLegalAcceptance()
+    }
+
+    const resumePath = nextPathAfterAuth()
+
     if (values.provider === 'google' && isSupabaseConfigured) {
-      await signInWithGoogle(routePaths[nextRouteAfterAuth()])
+      await signInWithGoogle(resumePath)
       return
     }
 
@@ -9248,7 +9297,8 @@ function App() {
       storeDemoUser(demoUser, values.remember)
     }
 
-    navigateRoute(nextRouteAfterAuth())
+    if (authMode === 'signup') trackEvent('signup_completed')
+    resumeAfterAuth(resumePath)
     notify(authMode === 'login' ? 'Bentornata: dashboard sincronizzata.' : 'Account creato: la tua area riservata è pronta.')
   }
 
@@ -9263,9 +9313,38 @@ function App() {
     }
   }
 
+  const openOwnedDocumentAccess = async (document: DocumentItem) => {
+    if (!isSupabaseConfigured || authUserIsDemo || !isPersistedFlashcardId(document.id)) {
+      setPreviewDocument(null)
+      openDocumentPage(document)
+      return
+    }
+    const access = await requestDocumentAccess({ documentId: document.id })
+    if (!access.ok) {
+      notify(access.message || 'Accesso al documento non disponibile.')
+      openDocumentPage(document)
+      return
+    }
+    if (access.data.canDownloadOriginal && access.data.originalUrl) {
+      window.location.assign(access.data.originalUrl)
+      notify('Download originale avviato (URL firmato a tempo).')
+      return
+    }
+    if (access.data.previews?.length) {
+      setPreviewDocument(null)
+      openDocumentPage(document)
+      notify(access.data.fullAccess
+        ? 'Documento sbloccato: anteprima e accesso completi disponibili.'
+        : 'Anteprima gratuita pronta. Sblocca per il PDF completo.')
+      return
+    }
+    setPreviewDocument(null)
+    openDocumentPage(document)
+  }
+
   const handleDownload = async (document: DocumentItem) => {
     if (!isLoggedIn) {
-      goAuth('login')
+      goAuth('login', documentPath(document))
       notify('Accedi per scaricare e salvare questo appunto.')
       return
     }
@@ -9306,14 +9385,24 @@ function App() {
       return
     }
     if (purchasePendingId === document.id) return
-    if (credits < price) {
-      navigateRoute('premium')
-      notify(`Servono ${price} crediti per questa dispensa: Premium ti aiuta quando sei a corto.`)
-      return
-    }
+
     const balanceBefore = credits
     setPurchasePendingId(document.id)
     try {
+      // Prefer existing entitlement: download without spending again.
+      const existing = await requestDocumentAccess({ documentId: document.id })
+      if (existing.ok && existing.data.fullAccess) {
+        await openOwnedDocumentAccess(document)
+        notify('Hai già accesso a questo materiale.')
+        return
+      }
+
+      if (credits < price) {
+        navigateRoute('premium')
+        notify(`Servono ${price} crediti per questa dispensa: Premium ti aiuta quando sei a corto.`)
+        return
+      }
+
       const purchase = await purchaseDocument(document.id)
       const persistedBalance = await getUserCreditBalance()
       const balanceAfter = typeof persistedBalance === 'number'
@@ -9342,6 +9431,9 @@ function App() {
           pages: document.pages,
         },
       })
+      trackEvent('document_purchased', { documentId: document.id })
+      // After purchase, open signed original/preview when available.
+      void openOwnedDocumentAccess(document)
       notify(`Dispensa sbloccata: ${purchase.credits_spent} crediti registrati.`)
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Acquisto non completato. Il saldo non è stato modificato.')
@@ -9361,6 +9453,7 @@ function App() {
     // submit permetterebbe refresh/doppio invio e mostrerebbe un saldo falso.
     // La demo locale conserva invece il feedback didattico del prototipo.
     const reward = walletMode ? 25 : 0
+    trackEvent('upload_completed', { documentId: document.id })
     setUploads((current) => [document, ...current])
     if (reward > 0 && walletMode && authUserId) {
       const state = addEarnedCredits(authUserId, reward, 'Caricamento approvato')
@@ -9438,6 +9531,7 @@ function App() {
           document={routeDocument}
           documents={visibleDocuments}
           isLoggedIn={Boolean(authUser)}
+          catalogLoading={isSupabaseConfigured && !catalogReady && !authUser?.isDemo}
           onDownload={handleDownload}
           onOpenDocument={openDocumentPage}
           onOpenProfile={openProfile}
@@ -9538,6 +9632,20 @@ function App() {
             openDocumentPage(doc)
           }}
         />
+      ) : null}
+      {legalAcceptanceNeeded && route !== 'login' && route !== 'signup' ? (
+        <aside className="legal-consent-banner" role="dialog" aria-label="Aggiornamento dei documenti legali">
+          <p>
+            Abbiamo aggiornato{' '}
+            <button className="auth-inline-link" onClick={() => navigateRoute('terms')} type="button">Termini e condizioni</button>
+            {' '}e{' '}
+            <button className="auth-inline-link" onClick={() => navigateRoute('privacy')} type="button">informativa privacy</button>
+            {' '}(versione {LEGAL_VERSION}). Per continuare a usare l’account registra la tua accettazione.
+          </p>
+          <button className="primary-action" onClick={() => void acceptCurrentLegalTerms()} type="button">
+            Ho letto e accetto
+          </button>
+        </aside>
       ) : null}
       {toast ? <Toast message={toast} /> : null}
     </>

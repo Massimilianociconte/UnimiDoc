@@ -16,7 +16,7 @@ export type DashboardNotification = {
 
 export type CreditHistoryEntry = {
   id: string
-  type: 'earned' | 'spent' | 'reserved'
+  type: 'earned' | 'spent' | 'reserved' | 'purchased' | 'welcome' | 'refunded' | 'adjusted'
   amount: number
   reason: string
   date: string
@@ -345,13 +345,30 @@ export async function loadDashboardLiveOverlay(user: AppAuthUser): Promise<Dashb
   const libraryRows = snapshot.library ?? []
   const purchaseRows = snapshot.purchases ?? []
 
-  const creditHistory: CreditHistoryEntry[] = txRows.map((row) => ({
-    id: row.id,
-    type: row.direction === 'spent' ? 'spent' : row.direction === 'reserved' ? 'reserved' : 'earned',
-    amount: row.amount,
-    reason: row.reason,
-    date: relativeTimeLabel(row.created_at),
-  }))
+  const creditHistory: CreditHistoryEntry[] = txRows.map((row) => {
+    const direction = row.direction
+    const type: CreditHistoryEntry['type'] =
+      direction === 'spent'
+        ? 'spent'
+        : direction === 'reserved'
+          ? 'reserved'
+          : direction === 'purchased'
+            ? 'purchased'
+            : direction === 'welcome'
+              ? 'welcome'
+              : direction === 'refunded' || direction === 'charged_back'
+                ? 'refunded'
+                : direction === 'adjusted' || direction === 'released'
+                  ? 'adjusted'
+                  : 'earned'
+    return {
+      id: row.id,
+      type,
+      amount: row.amount,
+      reason: row.reason,
+      date: relativeTimeLabel(row.created_at),
+    }
+  })
 
   let inferredBalance = credits
   const ledger: LedgerEntry[] = txRows.map((row) => {

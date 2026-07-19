@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { createServer, type Server } from 'node:http'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
@@ -11,12 +12,60 @@ import { PdfJobQueue } from './queue.js'
 import { executePdfStage } from './stages.js'
 import type { ClaimedPdfJob } from './types.js'
 
+type WorkerHealth = {
+  startedAt: number
+  lastClaimAt: number | null
+  lastCompletedAt: number | null
+  lastFailedAt: number | null
+  lastPollErrorAt: number | null
+  jobsCompleted: number
+  jobsFailed: number
+}
+
 type WorkerRuntime = {
   config: WorkerConfig
   supabase: SupabaseClient
   queue: PdfJobQueue
   store: PdfArtifactStore
   shutdown: AbortSignal
+  health: WorkerHealth
+}
+
+/**
+ * Liveness/readiness endpoint for the container orchestrator. Answers from
+ * the main event loop, so a wedged process fails the probe; job-level
+ * failures do not (the lease queue already retries those).
+ */
+function startHealthServer(runtime: WorkerRuntime): Server | null {
+  if (!runtime.config.healthPort) return null
+  const server = createServer((request, response) => {
+    if (request.url !== '/healthz' && request.url !== '/health') {
+      response.writeHead(404, { 'content-type': 'application/json' })
+      response.end('{"error":"not_found"}')
+      return
+    }
+    const shuttingDown = runtime.shutdown.aborted
+    response.writeHead(shuttingDown ? 503 : 200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({
+      status: shuttingDown ? 'shutting_down' : 'ok',
+      workerId: runtime.config.workerId,
+      pipelineVersion: runtime.config.pipelineVersion,
+      uptimeSeconds: Math.floor((Date.now() - runtime.health.startedAt) / 1000),
+      jobsCompleted: runtime.health.jobsCompleted,
+      jobsFailed: runtime.health.jobsFailed,
+      lastClaimAt: runtime.health.lastClaimAt,
+      lastCompletedAt: runtime.health.lastCompletedAt,
+      lastFailedAt: runtime.health.lastFailedAt,
+      lastPollErrorAt: runtime.health.lastPollErrorAt,
+    }))
+  })
+  // Bind loopback only: if the port is accidentally published, do not expose
+  // workerId / job counters on all interfaces.
+  server.listen(runtime.config.healthPort, '127.0.0.1', () => {
+    log('pdf_worker_health_listening', { port: runtime.config.healthPort, host: '127.0.0.1' })
+  })
+  server.unref()
+  return server
 }
 
 // Note: structured `log` and `logError` are imported from ./logger.ts above.
@@ -72,13 +121,29 @@ async function processJob(runtime: WorkerRuntime, job: ClaimedPdfJob): Promise<v
     if (heartbeatRunning || jobAbort.signal.aborted) return
     heartbeatRunning = true
     try {
-      const owned = await runtime.queue.heartbeat(job, progress, stage)
-      if (!owned) {
-        lostLease = true
-        jobAbort.abort(lostLeaseError())
-        jobLogger.leaseContention('lost_during_heartbeat')
-        throw lostLeaseError()
+      // Retry transient network/RPC blips before treating the job as lost.
+      // Only a definitive "not owned" response aborts immediately.
+      let lastError: unknown
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (jobAbort.signal.aborted) return
+        try {
+          const owned = await runtime.queue.heartbeat(job, progress, stage)
+          if (!owned) {
+            lostLease = true
+            jobAbort.abort(lostLeaseError())
+            jobLogger.leaseContention('lost_during_heartbeat')
+            throw lostLeaseError()
+          }
+          return
+        } catch (error) {
+          if (lostLease) throw error
+          lastError = error
+          if (attempt < 2) {
+            await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)))
+          }
+        }
       }
+      throw lastError instanceof Error ? lastError : new Error(String(lastError))
     } finally {
       heartbeatRunning = false
     }
@@ -86,7 +151,10 @@ async function processJob(runtime: WorkerRuntime, job: ClaimedPdfJob): Promise<v
 
   const heartbeatTimer = setInterval(() => {
     void heartbeat().catch((error) => {
+      // Lost lease is expected under contention; abort without extra noise.
+      if (lostLease) return
       jobLogger.error('pdf_job_heartbeat_failed', error)
+      // Only abort after the retried heartbeat path still fails.
       jobAbort.abort(error)
     })
   }, runtime.config.heartbeatMs)
@@ -117,6 +185,8 @@ async function processJob(runtime: WorkerRuntime, job: ClaimedPdfJob): Promise<v
     await execution.cleanup?.()
 
     const durationMs = Date.now() - startedAt
+    runtime.health.jobsCompleted += 1
+    runtime.health.lastCompletedAt = Date.now()
     jobLogger.info('pdf_job_completed', { skipped: execution.skipped === true, durationMs })
     logJobMetric(job.jobId, job.runId, job.documentId, 'duration_ms', durationMs, { jobType: job.jobType })
 
@@ -141,6 +211,8 @@ async function processJob(runtime: WorkerRuntime, job: ClaimedPdfJob): Promise<v
     }
 
     const durationMs = Date.now() - startedAt
+    runtime.health.jobsFailed += 1
+    runtime.health.lastFailedAt = Date.now()
     jobLogger.error('pdf_job_failed', error, {
       code: normalized.code,
       retryable: normalized.retryable,
@@ -164,10 +236,12 @@ async function workerSlot(runtime: WorkerRuntime, slot: number, once: boolean): 
         await abortableDelay(runtime.config.pollMs, runtime.shutdown)
         continue
       }
+      runtime.health.lastClaimAt = Date.now()
       log('pdf_worker_claimed', { slot, jobId: job.jobId, runId: job.runId, jobType: job.jobType })
       await processJob(runtime, job)
       if (once) return
     } catch (error) {
+      runtime.health.lastPollErrorAt = Date.now()
       log('pdf_worker_poll_failed', {
         slot,
         error: error instanceof Error ? error.message : String(error),
@@ -206,18 +280,32 @@ export async function runPdfWorker(input: { once?: boolean; env?: NodeJS.Process
     queue: new PdfJobQueue(supabase, config.workerId, config.leaseSeconds, config.pipelineVersion),
     store: new PdfArtifactStore(supabase),
     shutdown: shutdownController.signal,
+    health: {
+      startedAt: Date.now(),
+      lastClaimAt: null,
+      lastCompletedAt: null,
+      lastFailedAt: null,
+      lastPollErrorAt: null,
+      jobsCompleted: 0,
+      jobsFailed: 0,
+    },
   }
+  const healthServer = input.once ? null : startHealthServer(runtime)
   log('pdf_worker_started', {
     workerId: config.workerId,
     pipelineVersion: config.pipelineVersion,
     concurrency: input.once ? 1 : config.concurrency,
     once: input.once === true,
   })
-  const slots = Array.from(
-    { length: input.once ? 1 : config.concurrency },
-    (_, index) => workerSlot(runtime, index, input.once === true),
-  )
-  await Promise.all(slots)
+  try {
+    const slots = Array.from(
+      { length: input.once ? 1 : config.concurrency },
+      (_, index) => workerSlot(runtime, index, input.once === true),
+    )
+    await Promise.all(slots)
+  } finally {
+    healthServer?.close()
+  }
   log('pdf_worker_stopped', { workerId: config.workerId })
 }
 

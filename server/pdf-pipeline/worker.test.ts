@@ -126,6 +126,16 @@ describe('PDF worker operational safeguards', () => {
     expect(config.callbackSecret).toHaveLength(32)
   })
 
+  it('rejects heartbeat interval that cannot renew the lease', () => {
+    expect(() => loadWorkerConfig({
+      SUPABASE_URL: 'https://example.supabase.co',
+      SUPABASE_SERVICE_ROLE_KEY: 'secret',
+      PDF_WORKER_CALLBACK_SECRET: 'w'.repeat(32),
+      PDF_JOB_LEASE_SECONDS: '30',
+      PDF_WORKER_HEARTBEAT_MS: '30000',
+    })).toThrow('INVALID_HEARTBEAT_VS_LEASE')
+  })
+
   it('keeps permanent validation failures out of the retry loop', () => {
     const permanent = normalizeProcessingError(new Error('INVALID_PDF_MAGIC_BYTES'))
     expect(permanent.retryable).toBe(false)

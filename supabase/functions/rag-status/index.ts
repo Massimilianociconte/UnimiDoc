@@ -4,7 +4,7 @@
 // progress (chunks_embedded / chunks_total) so the dashboard can render
 // "Ricerca intelligente: in preparazione — 42/180". Read-only, access-checked.
 
-import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody, requireMethod, dbFailure} from '../_shared/http.ts'
 import { requireUser, adminClient, type AdminClient } from '../_shared/supabase.ts'
 import { createRequestLogger } from '../_shared/log.ts'
 
@@ -22,6 +22,8 @@ type RagJobRow = {
   const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
+  const methodDenied = requireMethod(req, ['POST'])
+  if (methodDenied) return methodDenied
 
   logger.info('rag_status_start')
 
@@ -38,7 +40,7 @@ type RagJobRow = {
 
     // Only surface docs the caller may access (owner / buyer / published).
     const { data: accessible, error: accessError } = await admin.rpc('rag_accessible_document_ids', { p_user: userId })
-    if (accessError) throw errors.badRequest(`Verifica accesso non riuscita: ${accessError.message}`)
+    if (accessError) throw dbFailure('db_error', accessError, 'Verifica accesso non riuscita')
     const allowed = new Set((accessible ?? []).map((r: { document_id: string }) => r.document_id))
     const requested = ids.filter((id: string) => allowed.has(id))
 

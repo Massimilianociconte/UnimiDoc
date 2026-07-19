@@ -24,6 +24,12 @@ export function loadWorkerConfig(env: Environment = process.env) {
   const serviceRoleKey = required(env, 'SUPABASE_SERVICE_ROLE_KEY')
   const callbackSecret = required(env, 'PDF_WORKER_CALLBACK_SECRET')
   if (callbackSecret.length < 32) throw new Error('INVALID_PDF_WORKER_CALLBACK_SECRET')
+  const heartbeatMs = numberValue(env, 'PDF_WORKER_HEARTBEAT_MS', Math.min(30_000, leaseSeconds * 250), 5_000, 60_000)
+  // Heartbeat must fire multiple times within a lease window; otherwise OCR
+  // jobs lose the lease before the first renewal lands.
+  if (heartbeatMs * 2 >= leaseSeconds * 1000) {
+    throw new Error('INVALID_HEARTBEAT_VS_LEASE: PDF_WORKER_HEARTBEAT_MS must be well below PDF_JOB_LEASE_SECONDS')
+  }
   return {
     supabaseUrl,
     serviceRoleKey,
@@ -34,7 +40,7 @@ export function loadWorkerConfig(env: Environment = process.env) {
     concurrency: numberValue(env, 'PDF_WORKER_CONCURRENCY', 1, 1, 4),
     pollMs: numberValue(env, 'PDF_WORKER_POLL_MS', 1500, 250, 60_000),
     leaseSeconds,
-    heartbeatMs: numberValue(env, 'PDF_WORKER_HEARTBEAT_MS', Math.min(30_000, leaseSeconds * 250), 5_000, 60_000),
+    heartbeatMs,
     tempRoot: env.PDF_WORKER_TMP_DIR?.trim() || path.join(os.tmpdir(), 'unimidoc-worker'),
     maxUploadBytes: numberValue(env, 'PDF_MAX_UPLOAD_BYTES', 50 * 1024 * 1024, 1024, 100 * 1024 * 1024),
     maxPages: numberValue(env, 'PDF_MAX_PAGES', 2000, 1, 5000),
@@ -54,5 +60,7 @@ export function loadWorkerConfig(env: Environment = process.env) {
       ragIndexMs: numberValue(env, 'PDF_RAG_INDEX_TIMEOUT_MS', 900_000, 30_000, 1_800_000),
     },
     skipDependencyCheck: env.PDF_WORKER_SKIP_DEPENDENCY_CHECK === 'true',
+    // 0 disables the endpoint (e.g. worker:pdf:once in CI).
+    healthPort: numberValue(env, 'PDF_WORKER_HEALTH_PORT', 8080, 0, 65_535),
   }
 }

@@ -10,7 +10,7 @@
 // Access requires an active Premium plan or the flashcard-specific entitlement.
 
 import { config } from '../_shared/env.ts'
-import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody, requireMethod, dbFailure} from '../_shared/http.ts'
 import {
   adminClient,
   requireUser,
@@ -74,6 +74,8 @@ function sanitizeCards(cards: GeneratedCard[], max: number): GeneratedCard[] {
 ;(globalThis as any).Deno.serve(async (req: Request) => {
   const pre = preflight(req)
   if (pre) return pre
+  const methodDenied = requireMethod(req, ['POST'])
+  if (methodDenied) return methodDenied
 
   try {
     const { id: userId } = await requireUser(req)
@@ -91,8 +93,9 @@ function sanitizeCards(cards: GeneratedCard[], max: number): GeneratedCard[] {
     }
 
     // --- Modalità RAG: chunk scelti dal server via embedding -----------------
+    // Rate limit is applied inside generateFromDocument after UUID/access
+    // validation so malformed requests never burn monthly quota.
     if (body.fromDocument === true) {
-      await enforceRateLimit(admin, userId, 'flashcards', config.limits.aiHelpsPerMonth)
       return await generateFromDocument(req, admin, userId, body)
     }
 
@@ -404,7 +407,7 @@ async function saveReviewedFromUpload(
     .eq('document_id', documentId)
     .neq('processing_state', 'failed')
     .order('chunk_index', { ascending: true })
-  if (chunkError) throw errors.badRequest(`Provenienza chunk non disponibile: ${chunkError.message}`)
+  if (chunkError) throw dbFailure('db_error', chunkError, 'Provenienza chunk non disponibile')
   const chunks = (chunkRows ?? []).map((chunk: {
     id: string
     chunk_index: number
@@ -441,7 +444,7 @@ async function saveReviewedFromUpload(
     if (reservationError.message.includes('document_quota')) {
       throw errors.badRequest('Il documento può contenere al massimo 300 flashcard revisionate.')
     }
-    throw errors.badRequest(`Impossibile riservare il salvataggio del deck: ${reservationError.message}`)
+    throw dbFailure('db_error', reservationError, 'Impossibile riservare il salvataggio del deck')
   }
   const savedIds = await persistDocumentCards({
     admin,
@@ -468,7 +471,7 @@ async function saveReviewedFromUpload(
     .update({ flashcard_status: 'ready' })
     .eq('id', documentId)
     .eq('owner_id', userId)
-  if (statusError) throw errors.badRequest(`Stato flashcard non aggiornato: ${statusError.message}`)
+  if (statusError) throw dbFailure('db_error', statusError, 'Stato flashcard non aggiornato')
 
   return jsonResponse({ savedIds, savedCount: savedIds.length, premium: true, source: 'human_reviewed' }, 200, req)
 }
@@ -482,7 +485,7 @@ async function generateFromDocument(req: Request, admin: AdminClient, userId: st
 
   // Access check — same authoritative rule as retrieval.
   const { data: accessible, error: accessError } = await admin.rpc('rag_accessible_document_ids', { p_user: userId })
-  if (accessError) throw errors.badRequest(`Verifica accesso non riuscita: ${accessError.message}`)
+  if (accessError) throw dbFailure('db_error', accessError, 'Verifica accesso non riuscita')
   if (!(accessible ?? []).some((row: { document_id: string }) => row.document_id === documentId)) {
     throw errors.paywall('Non hai accesso a questo documento.')
   }
@@ -496,6 +499,9 @@ async function generateFromDocument(req: Request, admin: AdminClient, userId: st
   if (doc.rag_status !== 'indexed' && doc.rag_status !== 'partial') {
     throw errors.badRequest('Documento non ancora indicizzato: avvia prima "Analisi intelligente" sul documento.')
   }
+
+  // Quota only after validation so bad documentId / no access does not burn budget.
+  await enforceRateLimit(admin, userId, 'flashcards', config.limits.aiHelpsPerMonth)
 
   // Cache: same document + index version + params ⇒ same deck.
   const key = await cacheKey([
@@ -536,7 +542,7 @@ async function generateFromDocument(req: Request, admin: AdminClient, userId: st
       p_version: provider.embeddingVersion,
       p_limit: 48,
     })
-    if (error) throw errors.badRequest(`Selezione argomenti non riuscita: ${error.message}`)
+    if (error) throw dbFailure('db_error', error, 'Selezione argomenti non riuscita')
     ranked = (data ?? []) as TopicChunk[]
   }
   if (ranked.length === 0) {

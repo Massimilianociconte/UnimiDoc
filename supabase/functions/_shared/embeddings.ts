@@ -64,10 +64,13 @@ class GeminiEmbeddingProvider implements EmbeddingProvider {
       }))
 
       const res = await fetchWithRetry(
-        `${GEMINI_BASE}/models/${EMBEDDING_MODEL}:batchEmbedContents?key=${config.gemini.apiKey}`,
+        `${GEMINI_BASE}/models/${EMBEDDING_MODEL}:batchEmbedContents`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': config.gemini.apiKey,
+          },
           body: JSON.stringify({ requests }),
         },
       )

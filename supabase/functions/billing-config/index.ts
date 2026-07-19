@@ -26,8 +26,6 @@ type DbOffer = {
 
   logger.info('billing_config_served')
 
-  if (req.method === 'POST') await parseJsonBody(req) // for future use or validation
-
   try {
     const readiness = billingReadiness('config')
     const connectReadiness = billingReadiness('connect')

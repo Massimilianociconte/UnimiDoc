@@ -5,7 +5,7 @@
 // document's preview_policy permits download. A non-entitled viewer receives
 // exclusively the free, watermarked preview pages — never the original bytes.
 
-import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, AppError, parseJsonBody, requireMethod} from '../_shared/http.ts'
 import { adminClient, requireUser, getEntitlement } from '../_shared/supabase.ts'
 import { createRequestLogger } from '../_shared/log.ts'
 
@@ -37,6 +37,8 @@ type PreviewRow = {
   const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
+  const methodDenied = requireMethod(req, ['POST'])
+  if (methodDenied) return methodDenied
 
   logger.info('document_access_start')
 

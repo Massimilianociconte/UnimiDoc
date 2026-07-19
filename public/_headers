@@ -2,14 +2,29 @@
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
-  Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net; worker-src 'self' blob: https://cdn.jsdelivr.net; child-src 'self' blob:; connect-src 'self' data: blob: https://pmpzfkikwfylesehfezv.supabase.co https://*.supabase.co https://cdn.jsdelivr.net https://tessdata.projectnaptha.com https://www.google-analytics.com https://region1.google-analytics.com; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net; worker-src 'self' blob: https://cdn.jsdelivr.net; child-src 'self' blob:; connect-src 'self' data: blob: https://pmpzfkikwfylesehfezv.supabase.co wss://pmpzfkikwfylesehfezv.supabase.co https://cdn.jsdelivr.net https://tessdata.projectnaptha.com; img-src 'self' data: blob: https://pmpzfkikwfylesehfezv.supabase.co https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' data: blob: https://pmpzfkikwfylesehfezv.supabase.co wss://pmpzfkikwfylesehfezv.supabase.co; img-src 'self' data: blob: https://pmpzfkikwfylesehfezv.supabase.co https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests
+
+# La policy enforced mantiene TEMPORANEAMENTE cdn.jsdelivr.net e
+# tessdata.projectnaptha.com finché l'ultimo deploy con OCR via CDN esce dalle
+# cache. La Report-Only qui sopra è la policy di arrivo (OCR self-hosted, zero
+# CDN): quando la console non mostra più violazioni, copiare la Report-Only al
+# posto della enforced. Google Analytics rimosso: nessun analytics di terze
+# parti è caricato (vedi Cookie Policy).
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 
 /pdfjs/*
   Cache-Control: public, max-age=31536000, immutable
+
+/tesseract/*
+  Cache-Control: public, max-age=604800
+
+/tesseract/*.wasm
+  Content-Type: application/wasm
 
 /course-icons/*
   Cache-Control: public, max-age=31536000, immutable

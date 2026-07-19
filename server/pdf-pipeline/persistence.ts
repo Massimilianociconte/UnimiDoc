@@ -151,4 +151,29 @@ export class PdfArtifactStore {
     const { error } = await this.supabase.from('ocr_runs').upsert(row, { onConflict: 'job_id' })
     if (error) throw persistenceError('upsert_ocr_run', error.message)
   }
+
+  /**
+   * Replace free/full page preview rows used by document-access.
+   * Unique on (document_id, page_number); delete-then-insert is intentional.
+   */
+  async replaceDocumentPreviews(
+    documentId: string,
+    rows: Array<{
+      document_id: string
+      owner_id: string
+      page_number: number
+      storage_bucket: string
+      storage_path: string
+      is_free_preview: boolean
+      watermarked: boolean
+    }>,
+  ): Promise<void> {
+    const deleted = await this.supabase.from('document_previews').delete().eq('document_id', documentId)
+    if (deleted.error) throw persistenceError('clear_document_previews', deleted.error.message)
+    if (rows.length === 0) return
+    await inBatches(rows, async (batch) => {
+      const { error } = await this.supabase.from('document_previews').insert(batch)
+      if (error) throw persistenceError('insert_document_previews', error.message)
+    })
+  }
 }

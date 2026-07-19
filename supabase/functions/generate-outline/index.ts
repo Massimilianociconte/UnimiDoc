@@ -3,7 +3,7 @@
 // deterministic candidates (title, page, evidence), never the whole PDF.
 
 import { config } from '../_shared/env.ts'
-import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody, requireMethod} from '../_shared/http.ts'
 import {
   adminClient,
   requireUser,
@@ -117,6 +117,8 @@ function sanitizeOutline(
   const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
+  const methodDenied = requireMethod(req, ['POST'])
+  if (methodDenied) return methodDenied
 
   logger.info('generate_outline_start')
 

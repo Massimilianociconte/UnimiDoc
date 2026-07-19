@@ -156,7 +156,11 @@ async function compressStage(job: ClaimedPdfJob, context: StageContext): Promise
   }
 
   await context.progress(28, 'validating_pdf')
-  await validatePdf(inputPath, { signal: context.signal, timeoutMs: context.config.timeouts.validateMs })
+  await validatePdf(inputPath, {
+    signal: context.signal,
+    timeoutMs: context.config.timeouts.validateMs,
+    maxBytes: context.config.maxUploadBytes,
+  })
   const before = await inspectPdf(inputPath, { signal: context.signal, timeoutMs: context.config.timeouts.extractMs })
   if (before.pageCount > context.config.maxPages) {
     throw new ProcessingError({
@@ -492,18 +496,35 @@ async function layoutStage(job: ClaimedPdfJob, context: StageContext): Promise<S
   }
 }
 
+/** First N pages are always free preview (signed by document-access). */
+const FREE_PREVIEW_PAGES = 2
+/** Cap full-access page previews written for document-access. */
+const MAX_DOCUMENT_PREVIEW_PAGES = 24
+
 async function figuresStage(job: ClaimedPdfJob, context: StageContext): Promise<StageExecutionResult> {
   let pages = await context.store.getPages(job)
-  const candidates = pages.filter((page) => page.has_images).slice(0, context.config.figureMaxPages)
-  const omitted = Math.max(0, pages.filter((page) => page.has_images).length - candidates.length)
+  // Always render the free teaser pages + image-backed pages (for figures).
+  const freePages = pages
+    .filter((page) => page.page_number <= FREE_PREVIEW_PAGES)
+    .sort((a, b) => a.page_number - b.page_number)
+  const imagePages = pages
+    .filter((page) => page.has_images && page.page_number > FREE_PREVIEW_PAGES)
+    .slice(0, context.config.figureMaxPages)
+  const byNumber = new Map<number, (typeof pages)[number]>()
+  for (const page of [...freePages, ...imagePages]) byNumber.set(page.page_number, page)
+  const candidates = [...byNumber.values()].sort((a, b) => a.page_number - b.page_number)
+  const omitted = Math.max(0, pages.filter((page) => page.has_images).length - imagePages.length)
+
   if (candidates.length === 0) {
     await context.store.replaceAssets(job, [])
-    return { skipped: true, result: { reason: 'no_figures', metrics: { candidates: 0 } } }
+    await context.store.replaceDocumentPreviews(job.documentId, [])
+    return { skipped: true, result: { reason: 'no_pages', metrics: { candidates: 0 } } }
   }
 
   const inputPath = await downloadJobPdf(job, context)
   const assets: AssetArtifact[] = []
   for (let index = 0; index < candidates.length; index += 1) {
+    if (context.signal.aborted) throw new Error('JOB_ABORTED')
     const page = candidates[index]
     await context.progress(10 + Math.floor((index / candidates.length) * 75), `rendering_figure_page_${page.page_number}`)
     const outputPrefix = path.join(context.workDir, `page-${page.page_number}`)
@@ -532,9 +553,10 @@ async function figuresStage(job: ClaimedPdfJob, context: StageContext): Promise<
       source: 'layout_detection',
       approved_by_user: false,
       metadata: {
-        scope: 'page_preview',
+        scope: page.page_number <= FREE_PREVIEW_PAGES ? 'free_preview' : 'page_preview',
         imageCount: page.image_inventory.length,
-        requiresUserCropApproval: true,
+        requiresUserCropApproval: page.page_number > FREE_PREVIEW_PAGES,
+        isFreePreview: page.page_number <= FREE_PREVIEW_PAGES,
       },
       processing_run_id: job.runId,
       artifact_version: job.artifactVersion,
@@ -543,6 +565,23 @@ async function figuresStage(job: ClaimedPdfJob, context: StageContext): Promise<
     })
   }
   await context.store.replaceAssets(job, assets)
+
+  // document-access reads document_previews (not assets). First N pages are free.
+  const previewRows = assets
+    .slice()
+    .sort((a, b) => a.page_number - b.page_number)
+    .slice(0, MAX_DOCUMENT_PREVIEW_PAGES)
+    .map((asset) => ({
+      document_id: job.documentId,
+      owner_id: job.ownerId,
+      page_number: asset.page_number,
+      storage_bucket: asset.storage_bucket ?? 'derived-previews',
+      storage_path: asset.storage_path!,
+      is_free_preview: asset.page_number <= FREE_PREVIEW_PAGES,
+      watermarked: true,
+    }))
+  await context.store.replaceDocumentPreviews(job.documentId, previewRows)
+
   const assetCountByPage = new Map(assets.map((asset) => [asset.page_number, 1]))
   pages = pages.map((page) => ({ ...page, asset_count: assetCountByPage.get(page.page_number) ?? 0 }))
   await context.store.upsertPages(pages)
@@ -550,8 +589,15 @@ async function figuresStage(job: ClaimedPdfJob, context: StageContext): Promise<
     result: {
       partial: omitted > 0,
       assets: assets.length,
+      freePreviews: previewRows.filter((row) => row.is_free_preview).length,
+      previews: previewRows.length,
       omitted,
-      metrics: { candidates: candidates.length + omitted, rendered: assets.length, omitted },
+      metrics: {
+        candidates: candidates.length + omitted,
+        rendered: assets.length,
+        freePreviews: previewRows.filter((row) => row.is_free_preview).length,
+        omitted,
+      },
     },
   }
 }
@@ -690,7 +736,8 @@ async function ragIndexStage(job: ClaimedPdfJob, context: StageContext): Promise
   })
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>
   if (!response.ok || !['indexed', 'partial'].includes(String(payload.status ?? ''))) {
-    const retryable = response.status === 202 || response.status === 401 || response.status === 409
+    // 401/403 = misconfigured worker secret or auth; do not burn retry budget.
+    const retryable = response.status === 202 || response.status === 409
       || response.status === 429 || response.status >= 500
     throw new ProcessingError({
       code: `RAG_INDEX_HTTP_${response.status}`,

@@ -6,7 +6,7 @@
 // asks the LLM to answer USING ONLY those chunks and returns structured
 // citations. The model never sees the whole document — only retrieved chunks.
 
-import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody, requireMethod, dbFailure} from '../_shared/http.ts'
 import { config } from '../_shared/env.ts'
 import {
   requireUser,
@@ -15,6 +15,7 @@ import {
   recordUsage,
   getEntitlement,
   enforceRateLimit,
+  type AdminClient,
 } from '../_shared/supabase.ts'
 import { getEmbeddingProvider } from '../_shared/embeddings.ts'
 import { deepseekChat, deepseekCost } from '../_shared/ai.ts'
@@ -46,6 +47,8 @@ type Match = {
   content: string
   structure: Record<string, unknown>
   similarity: number
+  // Punteggio ibrido (vettoriale + keyword) restituito dalla RPC.
+  rank_score?: number
 }
 
 function lexicalOverlap(left: string, right: string): number {
@@ -81,7 +84,7 @@ function selectPromptMatches(matches: Match[]): Match[] {
 
   const lambda = config.rag.mmrLambda // MMR trade-off (higher = more relevance, lower = more diversity)
   const selected: any[] = []
-  const usedChars = 0
+  let usedChars = 0
 
   const candidates = [...scored]
 
@@ -123,6 +126,7 @@ function selectPromptMatches(matches: Match[]): Match[] {
     if (isDuplicate) continue
 
     selected.push(chosen)
+    usedChars += Math.min(chosen.content.length, 4800)
   }
 
   // Return in original relevance order for good citations
@@ -133,6 +137,8 @@ function selectPromptMatches(matches: Match[]): Match[] {
 ;(globalThis as any).Deno.serve(async (req: Request) => {
   const pre = preflight(req)
   if (pre) return pre
+  const methodDenied = requireMethod(req, ['POST'])
+  if (methodDenied) return methodDenied
 
   const logger = createRequestLogger(req)
 
@@ -145,7 +151,7 @@ function selectPromptMatches(matches: Match[]): Match[] {
 
     // Validate the payload BEFORE spending rate-limit quota or DB roundtrips:
     // a malformed request must never consume the user's monthly budget.
-    const body = await parseJsonBody(req)
+    const body = await parseJsonBody<Record<string, unknown>>(req)
     if (!body || typeof body !== 'object') throw errors.badRequest('Body JSON mancante.')
     const query = String(body.query ?? '').trim()
     if (!query) throw errors.badRequest('query obbligatoria.')
@@ -183,7 +189,7 @@ function selectPromptMatches(matches: Match[]): Match[] {
       query_text: query,
       hybrid_alpha: config.rag.hybridAlpha,
     })
-    if (matchError) throw errors.badRequest(`Ricerca non riuscita: ${matchError.message}`)
+    if (matchError) throw dbFailure('db_error', matchError, 'Ricerca non riuscita')
     const matches = selectPromptMatches((matchesRaw ?? []) as Match[])
 
     logger.info('rag_retrieval_quality', {
@@ -223,15 +229,21 @@ function selectPromptMatches(matches: Match[]): Match[] {
       .in('id', docIds)
     const titleById = new Map((docs ?? []).map((d) => [d.id, d]))
 
-    // 4) Build the grounded prompt. Only retrieved chunks reach the model.
-    const context = matches
-      .map((m, i) => {
-        const doc = titleById.get(m.document_id)
-        const section = m.section_path?.length ? ` · ${m.section_path.join(' > ')}` : ''
-        const pages = m.page_start === m.page_end ? `p. ${m.page_start}` : `pp. ${m.page_start}-${m.page_end}`
-        return `[#${i + 1}] ${doc?.title ?? 'Documento'} (${pages}${section})\n${m.content.slice(0, 5000)}`
-      })
-      .join('\n\n---\n\n')
+    // 4) Build the grounded prompt. Only retrieved chunks reach the model,
+    //    and the total stays within the configured context budget.
+    const contextParts: string[] = []
+    let contextUsed = 0
+    for (let i = 0; i < matches.length; i++) {
+      const m = matches[i]
+      const doc = titleById.get(m.document_id)
+      const section = m.section_path?.length ? ` · ${m.section_path.join(' > ')}` : ''
+      const pages = m.page_start === m.page_end ? `p. ${m.page_start}` : `pp. ${m.page_start}-${m.page_end}`
+      const block = `[#${i + 1}] ${doc?.title ?? 'Documento'} (${pages}${section})\n${m.content.slice(0, 5000)}`
+      if (contextUsed + block.length > MAX_CONTEXT_CHARS && contextParts.length > 0) break
+      contextParts.push(block)
+      contextUsed += block.length
+    }
+    const context = contextParts.join('\n\n---\n\n')
 
     const result = await deepseekChat({
       messages: [

@@ -8,7 +8,9 @@
 4. avviare almeno una replica container;
 5. riconciliare i job legacy prima in dry-run.
 6. solo dopo uno smoke test riuscito, impostare `PDF_WORKER_ENABLED=true`
-   nelle Edge Function e `VITE_DOCUMENT_UPLOAD_ENABLED=true` nel frontend.
+   nelle Edge Function secrets e `VITE_DOCUMENT_UPLOAD_ENABLED=true` nel frontend
+   (Netlify). Entrambi i flag sono **fail-closed** (default off) finché non li
+   imposti esplicitamente.
 
 Il worker non viene deployato da Netlify o da `supabase functions deploy`.
 
@@ -26,11 +28,12 @@ Raccomandate:
 
 ```ini
 PDF_PIPELINE_VERSION=pdf-worker-v1
-PDF_CHUNKING_VERSION=section-aware-v2
+PDF_CHUNKING_VERSION=unified-v3
 PDF_WORKER_ID=production-eu-1
 PDF_WORKER_CONCURRENCY=1
 PDF_WORKER_POLL_MS=1500
 PDF_JOB_LEASE_SECONDS=180
+# Heartbeat must be well below lease (enforced at worker boot).
 PDF_WORKER_HEARTBEAT_MS=30000
 PDF_OCR_LANGUAGES=ita+eng
 PDF_OCR_MAX_PAGES_FREE=0
@@ -87,7 +90,40 @@ Feature flag raccomandati:
 
 **Runbook operativo**: Prima di cambiare versione del pipeline, drenare i job in corso o usare lo script di riconciliazione.
 
-Build container:
+## Deployment containerizzato
+
+Il repo include `docker-compose.worker.yml` + `.env.worker.example`:
+
+```bash
+cp .env.worker.example .env.worker   # compilare i secret
+docker compose -f docker-compose.worker.yml up -d --build
+docker compose -f docker-compose.worker.yml ps   # atteso: healthy
+```
+
+Caratteristiche già configurate:
+
+- **restart policy** `unless-stopped`: il container riparte dopo crash o reboot;
+- **healthcheck** su `GET http://127.0.0.1:8080/healthz` (endpoint in-process:
+  fallisce se l'event loop è bloccato o durante lo shutdown, non per errori di
+  singoli job). Risposta JSON: uptime, jobsCompleted, jobsFailed, lastClaimAt.
+  `PDF_WORKER_HEALTH_PORT=0` lo disattiva;
+- **shutdown pulito**: SIGTERM abortisce i job in corso, il lease scade e un
+  worker vivo li riprende (`stop_grace_period: 90s`);
+- **retry/dead-letter**: gestiti in Postgres (`retry_wait`, `max_attempts`,
+  `dead_lettered`, tabella `pdf_processing_job_attempts`); il claim RPC
+  riprende automaticamente i lease scaduti, quindi un upload non resta mai
+  bloccato finché almeno una replica è viva;
+- **log JSON** su stdout con rotazione (json-file 20m×5); collezionarli con il
+  driver del proprio host (Loki, CloudWatch, ecc.).
+
+Più repliche: `docker compose ... up -d --scale pdf-worker=2` (il
+`PDF_WORKER_ID` di default include hostname e PID, quindi resta univoco).
+
+Job bloccati / drift stato: query operative più sotto + `npm run
+worker:pdf:reconcile` (dry-run prima di `--apply`). Consigliato un check
+periodico del backlog dal monitoraggio (vedi `docs/OPERATIONS_MONITORING.md`).
+
+Build container manuale:
 
 ```bash
 docker build -f Dockerfile.worker -t unimidoc-pdf-worker:local .

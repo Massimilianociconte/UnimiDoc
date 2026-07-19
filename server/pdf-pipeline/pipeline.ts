@@ -196,7 +196,10 @@ export async function processUploadedPdf(input: PipelineInput) {
   }
 }
 
-export async function validatePdf(filePath: string, options: NativeCommandOptions = {}) {
+export async function validatePdf(
+  filePath: string,
+  options: NativeCommandOptions & { maxBytes?: number } = {},
+) {
   const fileHandle = await open(filePath, 'r')
   const header = Buffer.alloc(5)
 
@@ -211,7 +214,8 @@ export async function validatePdf(filePath: string, options: NativeCommandOption
   }
 
   const file = await stat(filePath)
-  if (file.size > 50 * 1024 * 1024) {
+  const maxBytes = options.maxBytes ?? 50 * 1024 * 1024
+  if (file.size > maxBytes) {
     throw new Error('PDF_TOO_LARGE')
   }
 

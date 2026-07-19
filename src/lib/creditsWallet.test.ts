@@ -77,4 +77,36 @@ describe('credit wallet economic buckets', () => {
 
     expect(loadWalletState('legacy').wallet.promotional).toBe(0)
   })
+
+  it('spends free credits only on documents priced within the welcome band', () => {
+    ensureWallet('buyer')
+    const cheap = purchaseWithWallet('buyer', initialDocuments[0], 10)
+    expect(cheap.ok).toBe(true)
+    if (!cheap.ok) return
+    expect(cheap.state.wallet.free).toBe(20)
+    expect(cheap.entry.breakdown).toMatchObject({ free: 10 })
+
+    // Free credits exist but cannot be spent on a high-price doc even though
+    // total balance would otherwise cover it with free + purchased.
+    storage.setItem('unimidoc:wallet:v1:mixed', JSON.stringify({
+      wallet: { free: 30, promotional: 0, purchased: 50, earned: 0, earnedConvertible: 0 },
+      ledger: [],
+      purchases: [],
+      initialized: true,
+    }))
+    const expensive = purchaseWithWallet('mixed', initialDocuments[0], 80)
+    expect(expensive.ok).toBe(false)
+    if (expensive.ok) return
+    expect(expensive.reason).toBe('free_only_low_cost')
+  })
+
+  it('returns already_owned without double charge', () => {
+    ensureWallet('buyer')
+    const first = purchaseWithWallet('buyer', initialDocuments[0], 10)
+    expect(first.ok).toBe(true)
+    const second = purchaseWithWallet('buyer', initialDocuments[0], 10)
+    expect(second.ok).toBe(false)
+    if (second.ok) return
+    expect(second.reason).toBe('already_owned')
+  })
 })

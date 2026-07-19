@@ -30,7 +30,7 @@ export function corsHeadersFor(req?: Request): Record<string, string> {
 
 const baseCorsHeaders: Record<string, string> = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   Vary: 'Origin',
 }
 
@@ -42,6 +42,21 @@ export function preflight(req: Request): Response | null {
     return new Response('ok', { headers: corsHeadersFor(req) })
   }
   return null
+}
+
+/** Reject unsupported HTTP methods early with a consistent 405. */
+export function requireMethod(req: Request, methods: string[]): Response | null {
+  if (methods.includes(req.method)) return null
+  return jsonResponse({ error: { code: 'method_not_allowed', message: 'Metodo non consentito.' } }, 405, req)
+}
+
+/**
+ * Map PostgREST/Postgres failures to a safe client message while logging detail.
+ * Prefer this over embedding `${error.message}` in badRequest().
+ */
+export function dbFailure(context: string, error: unknown, publicMessage: string): AppError {
+  logError(context, error)
+  return errors.badRequest(publicMessage)
 }
 
 export function jsonResponse(body: unknown, status = 200, req?: Request): Response {

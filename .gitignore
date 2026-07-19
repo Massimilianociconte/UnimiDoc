@@ -16,6 +16,8 @@ dist-ssr
 .env
 .env.*
 !.env.example
+!.env.worker.example
+!.env.e2e
 !supabase/.env.example
 supabase/.env
 supabase/.temp/
@@ -25,6 +27,12 @@ supabase/.temp/
 *.key
 *.crt
 *.mobileprovision
+
+# Local migration repair dumps / backups (never publish)
+.migration-repair-backup*/
+backups/
+*.bak
+*.bak-*
 
 # Local agent/editor runtime state
 .claude/
@@ -40,7 +48,12 @@ supabase/.temp/
 *.sln
 *.sw?
 
+# Asset OCR generati da scripts/fetch-ocr-assets.mjs (checksum pinnati)
+public/tesseract/
+
 # Playwright
 playwright-report/
 test-results/
 !.env.e2e
+
+.env.worker

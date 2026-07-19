@@ -2,8 +2,8 @@
 // erasure requests. No browser endpoint directly deletes an account or any
 // financial record; a verified worker applies retention/pseudonymisation rules.
 
-import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
-import { adminClient, requireUser, sha256Hex } from '../_shared/supabase.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody, requireMethod, dbFailure} from '../_shared/http.ts'
+import { adminClient, requireUser, sha256Hex, type AdminClient } from '../_shared/supabase.ts'
 
 const MAX_ROWS_PER_DATASET = 10_000
 
@@ -43,7 +43,7 @@ async function readAuthProfile(admin: AdminClient, userId: string) {
       updatedAt: user.updated_at,
       lastSignInAt: user.last_sign_in_at ?? null,
       userMetadata: user.user_metadata ?? {},
-      identities: (user.identities ?? []).map((identity: Record<string, unknown>) => ({
+      identities: (user.identities ?? []).map((identity) => ({
         id: String(identity.id ?? ''),
         provider: String(identity.provider ?? ''),
         createdAt: identity.created_at ?? null,
@@ -95,6 +95,7 @@ async function buildExport(admin: AdminClient, userId: string) {
     readOwned(admin, 'subject_study_progress', 'owner_id', userId),
     readOwned(admin, 'review_tasks', 'owner_id', userId),
     readOwned(admin, 'rag_query_logs', 'user_id', userId),
+    readOwned(admin, 'legal_consents', 'user_id', userId, 'id, document_type, legal_version, accepted_at, locale'),
     readOwned(admin, 'privacy_export_events', 'owner_id', userId),
     readOwned(admin, 'privacy_requests', 'requester_id', userId, 'id, request_type, status, public_message, legal_hold, requested_at, acknowledged_at, completed_at, cancelled_at, updated_at'),
     readBillingExport(admin, userId),
@@ -137,6 +138,7 @@ async function buildExport(admin: AdminClient, userId: string) {
     'subjectStudyProgress',
     'reviewTasks',
     'ragQueryLogs',
+    'legalConsents',
     'privacyExportEvents',
     'privacyRequests',
     'billing',
@@ -187,7 +189,7 @@ async function requestErasure(admin: any, userId: string, req: Request) {
     })
     .select('id, request_type, status, public_message, legal_hold, requested_at, updated_at')
     .single()
-  if (error) throw errors.badRequest(`Richiesta non registrata: ${error.message}`)
+  if (error) throw dbFailure('db_error', error, 'Richiesta non registrata')
   return jsonResponse({ request: data, idempotent: false }, 201, req)
 }
 
@@ -214,6 +216,8 @@ async function cancelErasure(admin: any, userId: string, requestId: string, req:
 ;(globalThis as any).Deno.serve(async (req: Request) => {
   const pre = preflight(req)
   if (pre) return pre
+  const methodDenied = requireMethod(req, ['POST'])
+  if (methodDenied) return methodDenied
   try {
     const { id: userId } = await requireUser(req)
     const admin = adminClient()
@@ -221,6 +225,16 @@ async function cancelErasure(admin: any, userId: string, requestId: string, req:
     const action = String(body.action ?? 'status')
 
     if (action === 'export') {
+      // Cap exports: full dump is expensive and privacy-sensitive.
+      const dayAgo = new Date(Date.now() - 86_400_000).toISOString()
+      const recent = await admin
+        .from('privacy_export_events')
+        .select('id', { count: 'exact', head: true })
+        .eq('owner_id', userId)
+        .gte('generated_at', dayAgo)
+      if ((recent.count ?? 0) >= 3) {
+        throw errors.rateLimited('Troppe esportazioni nelle ultime 24 ore. Riprova domani.')
+      }
       const payload = await buildExport(admin, userId)
       const manifestSha256 = await sha256Hex(JSON.stringify(payload))
       const datasets = Object.keys(payload.data)
@@ -234,7 +248,9 @@ async function cancelErasure(admin: any, userId: string, requestId: string, req:
     if (action === 'request_erasure') return await requestErasure(admin, userId, req)
     if (action === 'cancel_erasure') {
       const requestId = String(body.requestId ?? '')
-      if (!requestId) throw errors.badRequest('requestId mancante.')
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+        throw errors.badRequest('requestId non valido.')
+      }
       return await cancelErasure(admin, userId, requestId, req)
     }
     if (action === 'status') {
@@ -244,7 +260,7 @@ async function cancelErasure(admin: any, userId: string, requestId: string, req:
         .eq('requester_id', userId)
         .order('requested_at', { ascending: false })
         .limit(20)
-      if (error) throw errors.badRequest(`Stato privacy non disponibile: ${error.message}`)
+      if (error) throw dbFailure('db_error', error, 'Stato privacy non disponibile')
       return jsonResponse({ requests: data ?? [] }, 200, req)
     }
     throw errors.badRequest('Azione privacy non supportata.')

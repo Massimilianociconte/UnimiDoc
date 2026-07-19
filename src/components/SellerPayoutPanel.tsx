@@ -42,6 +42,18 @@ export function SellerPayoutPanel() {
       setPending(null)
       return
     }
+    try {
+      const parsed = new URL(result.data.url)
+      if (parsed.protocol !== 'https:' || !parsed.hostname.toLowerCase().endsWith('.stripe.com')) {
+        setError('URL di onboarding non attendibile: richiesta bloccata.')
+        setPending(null)
+        return
+      }
+    } catch {
+      setError('URL di onboarding non valido.')
+      setPending(null)
+      return
+    }
     window.location.assign(result.data.url)
   }
 

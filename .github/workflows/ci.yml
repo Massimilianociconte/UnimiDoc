@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Lint, typecheck (app + worker), unit test, build, budget bundle.
   build-and-test:
     runs-on: ubuntu-latest
     steps:
@@ -19,13 +20,43 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run typecheck:worker
+      - run: npm test
       # Il prerender usa le credenziali pubbliche (anon) se presenti nei
       # secrets; senza, viene saltato con warning e la build resta valida.
       - run: npm run build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-      - run: npm test
+      # Budget misurabile sul bundle: fallisce su aumenti anomali.
+      - run: npm run check:bundle
+
+  # Type-check Deno di tutte le Edge Functions + unit test dei moduli condivisi.
+  edge-functions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno check */index.ts
+        working-directory: supabase/functions
+      - run: deno test --allow-env _shared/
+        working-directory: supabase/functions
+
+  # Migrazioni applicate da zero (coerenza) + suite pgTAP: RLS, isolamento
+  # tra utenti, invarianti wallet, acquisti idempotenti, accesso RAG.
+  database:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: supabase db start
+      - run: supabase test db
 
   e2e:
     runs-on: ubuntu-latest
@@ -43,5 +74,7 @@ jobs:
         if: failure()
         with:
           name: playwright-report
-          path: playwright-report/
+          path: |
+            playwright-report/
+            test-results/
           retention-days: 7

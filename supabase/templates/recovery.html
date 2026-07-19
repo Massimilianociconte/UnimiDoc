@@ -1,0 +1,39 @@
+<html>
+  <body style="margin:0;padding:0;background:#f4f7f5;font-family:Arial,Helvetica,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f7f5;padding:32px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e2e8e4;border-radius:14px;padding:36px;">
+            <tr><td style="font-size:20px;font-weight:bold;color:#14532d;padding-bottom:18px;">UnimiDoc</td></tr>
+            <tr><td style="font-size:17px;font-weight:bold;color:#111827;padding-bottom:10px;">Reimposta la password</td></tr>
+            <tr>
+              <td style="font-size:14px;line-height:1.6;color:#374151;padding-bottom:22px;">
+                Abbiamo ricevuto una richiesta di reimpostazione della password per il tuo account.
+                Il link è valido per un tempo limitato e può essere usato una sola volta.
+              </td>
+            </tr>
+            <tr>
+              <td style="padding-bottom:24px;">
+                <a href="{{ .ConfirmationURL }}"
+                   style="display:inline-block;background:#16a34a;color:#ffffff;text-decoration:none;font-size:15px;font-weight:bold;padding:12px 26px;border-radius:10px;">
+                  Scegli una nuova password
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="font-size:12px;line-height:1.6;color:#6b7280;border-top:1px solid #eef2ef;padding-top:18px;">
+                Se non hai richiesto tu il reset, ignora questa email: la password attuale resta valida.
+                Per sicurezza non condividere mai questo link.<br />
+                Se il pulsante non funziona, copia questo link nel browser:<br />
+                <span style="word-break:break-all;color:#374151;">{{ .ConfirmationURL }}</span>
+              </td>
+            </tr>
+          </table>
+          <p style="font-size:11px;color:#9ca3af;margin-top:16px;">
+            UnimiDoc è un progetto indipendente, non affiliato all’Università degli Studi di Milano.
+          </p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

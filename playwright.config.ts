@@ -8,10 +8,13 @@ export default defineConfig({
   timeout: 45_000,
   fullyParallel: true,
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? [['github'], ['list']] : [['list']],
+  reporter: process.env.CI
+    ? [['github'], ['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]]
+    : [['list']],
   use: {
     baseURL: 'http://127.0.0.1:5199',
     trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {

@@ -11,10 +11,29 @@ import {
   type BillingConfig,
   type BillingStatus,
 } from '../lib/billingClient'
-import { TOPUP_PACKS } from '../lib/creditPricing'
 import type { LegalRoute } from '../legalContent'
 
 const LAST_CHECKOUT_KEY = 'unimidoc:last-checkout-request'
+
+const STRIPE_REDIRECT_HOSTS = new Set([
+  'checkout.stripe.com',
+  'billing.stripe.com',
+  'connect.stripe.com',
+])
+
+function isAllowedStripeRedirect(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'https:') return false
+    const host = parsed.hostname.toLowerCase()
+    if (STRIPE_REDIRECT_HOSTS.has(host)) return true
+    // Stripe test/regional hosts e.g. checkout.stripe.com already covered;
+    // allow known *.stripe.com for Connect account links.
+    return host.endsWith('.stripe.com')
+  } catch {
+    return false
+  }
+}
 
 function formatMoney(amountMinor: number, currency = 'eur') {
   return new Intl.NumberFormat('it-IT', { style: 'currency', currency: currency.toUpperCase() }).format(amountMinor / 100)
@@ -134,6 +153,11 @@ export function BillingPlans({
       setPending(null)
       return
     }
+    if (!isAllowedStripeRedirect(result.data.url)) {
+      setError('URL di pagamento non attendibile: richiesta bloccata.')
+      setPending(null)
+      return
+    }
     window.sessionStorage.setItem(LAST_CHECKOUT_KEY, result.data.checkoutRequestId)
     window.location.assign(result.data.url)
   }
@@ -144,6 +168,11 @@ export function BillingPlans({
     const result = await createBillingPortal()
     if (!result.ok) {
       setError(result.message)
+      setPending(null)
+      return
+    }
+    if (!isAllowedStripeRedirect(result.data.url)) {
+      setError('URL del portale non attendibile: richiesta bloccata.')
       setPending(null)
       return
     }
@@ -205,16 +234,13 @@ export function BillingPlans({
           <strong className="premium-plan-price">da €5</strong>
           <p className="premium-plan-note">La parte bonus è promozionale e resta distinta dai crediti coperti dal pagamento.</p>
           <ul className="premium-pack-list billing-pack-list">
-            {(topupOffers.length ? topupOffers : TOPUP_PACKS.map((pack) => ({
-              key: `topup_${pack.id}`,
-              kind: 'topup' as const,
-              name: pack.id,
-              amountMinor: pack.priceEur * 100,
-              currency: 'eur',
-              paidCredits: pack.paidCredits,
-              promotionalCredits: pack.promotionalCredits,
-              totalCredits: pack.totalCredits,
-            }))).map((offer) => (
+            {topupOffers.length === 0 ? (
+              <li className="billing-pack-unavailable">
+                <span>Catalogo ricariche non disponibile dal server.</span>
+                <strong>—</strong>
+                <em>nessun pacchetto inventato in locale</em>
+              </li>
+            ) : topupOffers.map((offer) => (
               <li key={offer.key}>
                 <span>{formatMoney(offer.amountMinor, offer.currency)}</span>
                 <strong>{offer.totalCredits} crediti</strong>

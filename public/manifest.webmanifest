@@ -1,0 +1,25 @@
+{
+  "name": "UnimiDoc - Appunti verificati per la Statale di Milano",
+  "short_name": "UnimiDoc",
+  "description": "Appunti, flashcard e strumenti di studio per gli studenti della Statale di Milano.",
+  "lang": "it",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fbfdfb",
+  "theme_color": "#166845",
+  "icons": [
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/unimidoc-logo.webp",
+      "sizes": "512x512",
+      "type": "image/webp",
+      "purpose": "any"
+    }
+  ]
+}

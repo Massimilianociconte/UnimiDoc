@@ -4,6 +4,7 @@ import {
   isLegalOperatorConfigured,
   legalDocumentForRoute,
   legalDocuments,
+  legalDocumentsAreDraft,
   legalOperator,
   type LegalRoute,
 } from '../legalContent'
@@ -24,19 +25,24 @@ export function LegalPage({
           <ArrowLeft size={17} /> Torna a UnimiDoc
         </button>
         <span className="legal-kicker"><ShieldCheck size={16} /> Trasparenza e regole del servizio</span>
-        <h1>{document.title}</h1>
+        <h1>
+          {document.title}
+          {legalDocumentsAreDraft ? <span className="legal-draft-badge">Bozza</span> : null}
+        </h1>
         <p>{document.description}</p>
-        <small>Versione {LEGAL_VERSION} · Ultimo aggiornamento 11 luglio 2026</small>
+        <small>Versione {LEGAL_VERSION} · Ultimo aggiornamento 15 luglio 2026</small>
       </header>
 
       {!isLegalOperatorConfigured ? (
         <section className="legal-config-warning" role="status">
           <AlertTriangle size={22} />
           <div>
-            <strong>Identità del gestore da completare prima della monetizzazione</strong>
+            <strong>Bozza operativa: documento non ancora definitivo</strong>
             <p>
-              Il testo operativo è disponibile, ma ragione sociale o nome, indirizzo e contatto legale devono essere
-              configurati e approvati prima di abilitare checkout e payout.
+              Questo testo descrive i flussi tecnici implementati, ma ragione sociale o nome, indirizzo e contatto
+              legale del titolare non sono ancora configurati. Finché i dati identificativi non vengono forniti e i
+              testi non superano la revisione professionale, il documento va considerato una bozza da completare e non
+              un testo contrattuale approvato.
             </p>
           </div>
         </section>

@@ -5,7 +5,7 @@
 // previews and confirms before saving.
 
 import { config } from '../_shared/env.ts'
-import { preflight, jsonResponse, errorResponse, errors, parseJsonBody } from '../_shared/http.ts'
+import { preflight, jsonResponse, errorResponse, errors, parseJsonBody, requireMethod} from '../_shared/http.ts'
 import {
   adminClient,
   requireUser,
@@ -79,6 +79,8 @@ const round = (n: number) => Math.round(n * 1000) / 1000
   const logger = createRequestLogger(req)
   const pre = preflight(req)
   if (pre) return pre
+  const methodDenied = requireMethod(req, ['POST'])
+  if (methodDenied) return methodDenied
 
   logger.info('image_occlusion_start')
 
