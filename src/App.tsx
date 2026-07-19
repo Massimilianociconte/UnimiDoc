@@ -119,7 +119,7 @@ import type {
   PdfAnalysis,
 } from './lib/pdfProcessing'
 import { calculateNextReview, evaluateTextAnswer, type AnswerStatus, type SrsRating, type SrsState } from './lib/studyEngine'
-import { getPremiumState, refreshPremiumState, setPremiumState } from './lib/entitlements'
+import { getPremiumState, refreshPremiumState } from './lib/entitlements'
 import { AskDocumentPanel } from './components/rag/AskDocumentPanel'
 import {
   autoDetectOcclusion,
@@ -4164,7 +4164,7 @@ function FlashcardStudyModal({
   )
 }
 
-function FlashcardGenerationSummary({
+export function FlashcardGenerationSummary({
   analysis,
   cards,
   steps,
@@ -4273,7 +4273,7 @@ function normalizeOcclusionMask(mask: OcclusionMask): OcclusionMask {
   }
 }
 
-function ImageOcclusionLab({ analysis, premium }: { analysis?: PdfAnalysis | null; premium: boolean }) {
+export function ImageOcclusionLab({ analysis, premium }: { analysis?: PdfAnalysis | null; premium: boolean }) {
   const renderedPages = analysis?.renderedPages ?? emptyRenderedPages
   const visualPages = renderedPages.length ? renderedPages : demoOcclusionPages
   const firstVisualPage = visualPages[0]?.page ?? 1
@@ -4798,7 +4798,7 @@ function ImageOcclusionLab({ analysis, premium }: { analysis?: PdfAnalysis | nul
   )
 }
 
-function FreeStudyToolsPanel({
+export function FreeStudyToolsPanel({
   analysis,
   storageKey,
   title,
@@ -5299,14 +5299,6 @@ const UPLOAD_READER_DRAFT_KEY = 'unimidoc:upload-reader-draft:v1'
 const MAX_DRAFT_SENTENCES = 1200
 const MAX_DRAFT_TEXT_CHARS = 260_000
 
-function readerStorageKeyForAnalysis(analysis: PdfAnalysis): string {
-  const sentenceSample = analysis.sentences
-    .slice(0, 120)
-    .map((sentence) => `${sentence.page}:${sentence.text}`)
-    .join('|')
-  const fallback = analysis.text.slice(0, 6000)
-  return `upload-${hashString(`${analysis.pageCount}:${sentenceSample || fallback}`).toString(36)}`
-}
 
 function makeDraftAnalysis(analysis: PdfAnalysis): PdfAnalysis {
   const sentences: DocSentence[] = []
@@ -5442,13 +5434,10 @@ function UploadPage({
   const [indexState, setIndexState] = useState<'idle' | 'queued' | 'indexing' | 'indexed' | 'failed'>('idle')
   const [deckState, setDeckState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   const [cards, setCards] = useState<Flashcard[]>([])
-  const [reviewCardIndex, setReviewCardIndex] = useState(0)
-  const [approvedCardIds, setApprovedCardIds] = useState<Set<string>>(() => new Set())
-  const [rebuilding, setRebuilding] = useState(false)
-  const [studyOpen, setStudyOpen] = useState(false)
-  // Workspace a schede: prima i dati del documento, poi gli strumenti avanzati,
-  // così il form non è affollato da OCR/flashcard/occlusion tutti insieme.
-  const [workspaceTab, setWorkspaceTab] = useState<'dati' | 'strumenti'>('dati')
+  // Guided upload wizard: file → essentials → course details → review & send.
+  // Study tools live in the library/dashboard, not here.
+  type UploadWizardStep = 0 | 1 | 2 | 3
+  const [wizardStep, setWizardStep] = useState<UploadWizardStep>(0)
 
   const [title, setTitle] = useState(() => restoredDraft?.title ?? '')
   const [degreeSlug, setDegreeSlug] = useState(DEFAULT_DEGREE_SLUG)
@@ -5581,9 +5570,6 @@ function UploadPage({
     }
   }, [insights, tagsInput])
 
-  useEffect(() => {
-    setReviewCardIndex((current) => Math.min(current, Math.max(0, cards.length - 1)))
-  }, [cards.length])
 
   useEffect(() => {
     if (phase === 'ready' && analysis) {
@@ -5599,6 +5585,7 @@ function UploadPage({
     setRestoredDraft(null)
     setFile(null)
     setPhase('idle')
+    setWizardStep(0)
     setError('')
     setCloudState('idle')
     setIndexState('idle')
@@ -5608,8 +5595,6 @@ function UploadPage({
     setInsights(null)
     setCompression(null)
     setCards([])
-    setReviewCardIndex(0)
-    setApprovedCardIds(new Set())
     setRights(false)
     setEarned(0)
     setTitle('')
@@ -5637,8 +5622,6 @@ function UploadPage({
     setInsights(null)
     setCompression(null)
     setCards([])
-    setReviewCardIndex(0)
-    setApprovedCardIds(new Set())
 
     const pdf = isPdfFile(picked)
     const word = isWordFile(picked) && !pdf
@@ -5807,9 +5790,7 @@ function UploadPage({
               })
             })
             setCards(generated)
-            setReviewCardIndex(0)
-            setApprovedCardIds(new Set())
-            patchStep('flashcards', {
+                            patchStep('flashcards', {
               status: generated.length ? 'done' : 'skipped',
               detail: generated.length
                 ? `${generated.length} flashcard AI Premium pronte per revisione`
@@ -5826,8 +5807,9 @@ function UploadPage({
       }
 
       if (!title) setTitle(inferredTitle)
-      patchStep('finalize', { status: 'done', detail: 'Rivedi dati e strumenti, poi invia' })
+      patchStep('finalize', { status: 'done', detail: 'File pronto: completa i dati e invia' })
       setPhase('ready')
+      setWizardStep(1)
     } catch (caught) {
       patchStep('read', { status: 'error', detail: 'File non leggibile o protetto' })
       setError(caught instanceof Error ? `Elaborazione non riuscita: ${caught.message}` : 'Elaborazione non riuscita.')
@@ -5854,81 +5836,6 @@ function UploadPage({
     void runPipeline(candidate)
   }
 
-  const regenerate = () => {
-    if (!analysis) return
-    if (!premium) {
-      skipFreeFlashcards()
-      return
-    }
-    setRebuilding(true)
-    patchStep('flashcards', { status: 'running', detail: 'Rigenerazione AI Premium…' })
-    generatePremiumDeckFromBackend(analysis, (done, total) => {
-      patchStep('flashcards', {
-        status: 'running',
-        detail: `Rigenerazione AI Premium · batch ${Math.min(done + 1, total)}/${total}`,
-      })
-    })
-      .then((generated) => {
-        setCards(generated)
-        setReviewCardIndex(0)
-        setApprovedCardIds(new Set())
-        patchStep('flashcards', {
-          status: generated.length ? 'done' : 'skipped',
-          detail: generated.length ? `${generated.length} flashcard AI Premium rigenerate` : 'Testo insufficiente',
-        })
-      })
-      .catch((error) => {
-        setCards([])
-        patchStep('flashcards', {
-          status: 'error',
-          detail: error instanceof Error ? error.message : 'Rigenerazione AI non riuscita',
-        })
-      })
-      .finally(() => {
-        setRebuilding(false)
-      })
-  }
-
-  const changeMode = (nextPremium: boolean) => {
-    setPremium(nextPremium)
-    // Live Supabase: entitlement is server-authoritative. Never write a spoofable
-    // local premium flag that would unlock client AI gates before a 402.
-    if (!isSupabaseConfigured) setPremiumState(nextPremium)
-    if (analysis && doFlashcards) {
-      if (!nextPremium) {
-        skipFreeFlashcards()
-      } else {
-        setRebuilding(true)
-        patchStep('flashcards', { status: 'running', detail: 'Generazione AI Premium…' })
-        generatePremiumDeckFromBackend(analysis, (done, total) => {
-          patchStep('flashcards', {
-            status: 'running',
-            detail: `Generazione AI Premium · batch ${Math.min(done + 1, total)}/${total}`,
-          })
-        })
-          .then((generated) => {
-            setCards(generated)
-            setReviewCardIndex(0)
-            setApprovedCardIds(new Set())
-            patchStep('flashcards', {
-              status: generated.length ? 'done' : 'skipped',
-              detail: generated.length ? `${generated.length} flashcard AI Premium pronte` : 'Testo insufficiente',
-            })
-          })
-          .catch((error) => {
-            setCards([])
-            patchStep('flashcards', {
-              status: 'error',
-              detail: error instanceof Error ? error.message : 'Generazione AI non riuscita',
-            })
-          })
-          .finally(() => {
-            setRebuilding(false)
-          })
-      }
-    }
-  }
-
   const changeFlashcardOption = (enabled: boolean) => {
     setDoFlashcards(enabled)
     if (!enabled) {
@@ -5941,40 +5848,25 @@ function UploadPage({
       skipFreeFlashcards()
       return
     }
-    regenerate()
-  }
-
-  const updateCard = (id: string, patch: Partial<Flashcard>) =>
-    setCards((current) => current.map((card) => (card.id === id ? { ...card, ...patch } : card)))
-  const removeCard = (id: string) => {
-    setCards((current) => current.filter((card) => card.id !== id))
-    setApprovedCardIds((current) => {
-      const next = new Set(current)
-      next.delete(id)
-      return next
-    })
-    setReviewCardIndex((current) => Math.max(0, current - 1))
-  }
-  const addCard = () => {
-    setReviewCardIndex(cards.length)
-    setCards((current) => [
-      ...current,
-      { id: `fc-manual-${current.length + 1}-${current.length}`, front: '', back: '', source: 'concetto', score: 0, ref: null },
-    ])
+    patchStep('flashcards', { status: 'running', detail: 'Generazione AI Premium…' })
+    void generatePremiumDeckFromBackend(analysis)
+      .then((generated) => {
+        setCards(generated)
+                patchStep('flashcards', {
+          status: generated.length ? 'done' : 'skipped',
+          detail: generated.length ? `${generated.length} flashcard AI Premium` : 'Testo insufficiente',
+        })
+      })
+      .catch((error) => {
+        setCards([])
+        patchStep('flashcards', {
+          status: 'error',
+          detail: error instanceof Error ? error.message : 'Generazione AI non riuscita',
+        })
+      })
   }
 
   const includedCards = cards.filter((card) => card.front.trim() && card.back.trim())
-  const safeReviewCardIndex = Math.min(reviewCardIndex, Math.max(0, cards.length - 1))
-  const currentReviewCard = cards[safeReviewCardIndex]
-  const approvedCount = includedCards.filter((card) => approvedCardIds.has(card.id)).length
-  const toggleApproveCard = (id: string) => {
-    setApprovedCardIds((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
   const canPublish = phase === 'ready'
     && cloudState !== 'saving'
     && Boolean(file)
@@ -6150,12 +6042,13 @@ function UploadPage({
       // The durable DB trigger creates the RAG job only after quality_review.
       // Do not race it from the browser while extraction/OCR is still queued.
       setIndexState('queued')
-      const reviewedCards = includedCards.filter((card) => approvedCardIds.has(card.id))
-      if (reviewedCards.length > 0) {
+      // Flashcard review lives outside upload: persist any complete cards generated
+      // during the pipeline without requiring a study-tools UI on this page.
+      if (includedCards.length > 0) {
         setDeckState('saving')
         void saveReviewedFlashcards({
           documentId: document.id,
-          cards: reviewedCards.map((card) => ({
+          cards: includedCards.map((card) => ({
             type: backendFlashcardType[card.source],
             question: card.front,
             answer: card.back,
@@ -6167,10 +6060,43 @@ function UploadPage({
             tags: [card.source, card.ref?.section].filter((tag): tag is string => Boolean(tag)),
           })),
         }).then((saved) => {
-          setDeckState(saved.ok && saved.data.savedCount === reviewedCards.length ? 'saved' : 'failed')
+          setDeckState(saved.ok && saved.data.savedCount === includedCards.length ? 'saved' : 'failed')
         })
       }
     }
+  }
+
+  const wizardSteps = [
+    { id: 0 as const, label: 'File', hint: 'Carica il materiale' },
+    { id: 1 as const, label: 'Essenziali', hint: 'Titolo e corso' },
+    { id: 2 as const, label: 'Dettagli', hint: 'Docente e contesto' },
+    { id: 3 as const, label: 'Invio', hint: 'Rivedi e pubblica' },
+  ]
+  const step1Ready = title.trim().length >= 3 && Boolean(subject.trim())
+  const step2Ready = Boolean(professor.trim())
+  const goWizard = (step: UploadWizardStep) => {
+    setError('')
+    setWizardStep(step)
+  }
+  const goNextWizard = () => {
+    if (wizardStep === 0 && phase !== 'ready' && !file) {
+      setError('Carica un PDF o Word per continuare, oppure compila i dati e ricarica il file prima dell’invio.')
+      return
+    }
+    if (wizardStep === 1 && !step1Ready) {
+      setError('Inserisci almeno titolo (3+ caratteri) e materia.')
+      return
+    }
+    if (wizardStep === 2 && !step2Ready) {
+      setError('Indica il docente del corso.')
+      return
+    }
+    setError('')
+    setWizardStep((current) => Math.min(3, current + 1) as UploadWizardStep)
+  }
+  const goPrevWizard = () => {
+    setError('')
+    setWizardStep((current) => Math.max(0, current - 1) as UploadWizardStep)
   }
 
   const compressionBadge = compression
@@ -6178,65 +6104,22 @@ function UploadPage({
       ? 'Già ottimizzato'
       : `−${compression.savedPct}% lossless`
     : 'Sempre attiva'
-  const flashcardBadge = includedCards.length
-    ? `${includedCards.length} Premium`
-    : doFlashcards
-      ? premium
-        ? 'Premium'
-        : 'Solo Premium'
-      : 'Disattivate'
-  const ocrBadge = analysis
-    ? analysis.ocrPages.length
-      ? `${analysis.ocrPages.length} pagine in coda`
-      : 'Nessun OCR necessario'
-    : 'Cost-first'
-  const flashcardModeName = 'Premium'
-  const flashcardModeNote = premium
-    ? 'Usa i chunk puliti e selezionati: generazione avanzata lato backend, con cache e controllo qualità.'
-    : 'Le flashcard automatiche sono riservate a Premium per mantenere deck più pertinenti e meno casuali.'
   const selectedCourseMeta = formatCourseMeta(selectedCourse)
-  const freeReaderTitle = title.trim() || file?.name || 'Documento caricato'
-  const freeReaderStorageKey = `${draftOwnerId}:${analysis ? readerStorageKeyForAnalysis(analysis) : 'upload-empty'}`
+  const fileReady = phase === 'ready' || Boolean(file && analysis)
 
   return (
     <main className="upload-page section-wrap">
-      <section className="upload-hero">
-        <div>
-          <h1>Carica appunti fatti bene. Aiuteranno qualcuno davvero.</h1>
+      <header className="upload-hero upload-hero-centered">
+        <div className="upload-hero-copy">
+          <p className="upload-kicker">Condividi materiale UniMi</p>
+          <h1>Carica i tuoi appunti in pochi passaggi</h1>
           <p>
-            Il PDF viene compresso senza perdite, analizzato per l’OCR e preparato per strumenti di studio:
-            tutto prima dell’invio. Resta in revisione prima di essere pubblicato.
+            Scegli il file, completa i dati del corso e invia in revisione.
+            Compressione e controlli automatici restano in background: tu ti occupi solo di descrivere il materiale.
           </p>
         </div>
-        <img src={uploadBackpack} alt="Upload appunti" />
-      </section>
-
-      <section className="upload-automation-grid" aria-label="Automazioni sul PDF">
-        <article className={compression ? 'is-live' : ''}>
-          <span><FileArchive size={22} /></span>
-          <div>
-            <h2>Compressione lossless</h2>
-            <p>PDF più leggeri senza perdere testo, immagini, annotazioni o layer OCR.</p>
-          </div>
-          <strong>{compressionBadge}</strong>
-        </article>
-        <article className={includedCards.length ? 'is-live' : ''}>
-          <span><BrainCircuit size={22} /></span>
-          <div>
-            <h2>Flashcard automatiche</h2>
-            <p>Deck automatici solo Premium, costruiti sui chunk migliori e sempre revisionabili.</p>
-          </div>
-          <strong>{flashcardBadge}</strong>
-        </article>
-        <article className={analysis ? 'is-live' : ''}>
-          <span><ScanLine size={22} /></span>
-          <div>
-            <h2>OCR selettivo</h2>
-            <p>Le pagine scannerizzate vengono individuate solo quando il testo nativo non basta.</p>
-          </div>
-          <strong>{ocrBadge}</strong>
-        </article>
-      </section>
+        <img src={uploadBackpack} alt="" aria-hidden="true" />
+      </header>
 
       {phase === 'published' ? (
         <section className="upload-success">
@@ -6250,45 +6133,43 @@ function UploadPage({
           {cloudState !== 'idle' ? (
             <p className={`upload-cloud-state is-${cloudState === 'queued' ? 'saving' : cloudState}`}>
               {cloudState === 'saving'
-                ? 'Trasferimento cloud in corso: preparo il PDF nello Storage privato…'
+                ? 'Trasferimento cloud in corso…'
                 : cloudState === 'queued'
-                  ? 'PDF caricato: verifica nativa, compressione ed estrazione sono accodate. La revisione inizierà solo dopo i controlli.'
+                  ? 'PDF caricato: verifica nativa e analisi sono accodate.'
                 : cloudState === 'saved'
-                  ? 'Upload verificato e inviato in revisione: il PDF è archiviato nello Storage privato.'
-                  : 'Salvataggio cloud non riuscito: il documento non è stato inviato. Torna al modulo e riprova.'}
+                  ? 'Upload verificato e inviato in revisione.'
+                  : 'Salvataggio cloud non riuscito: riprova dal modulo.'}
             </p>
           ) : null}
           {indexState !== 'idle' ? (
             <p className={`upload-cloud-state is-${indexState === 'indexed' ? 'saved' : indexState === 'failed' ? 'failed' : 'saving'}`}>
-              {indexState === 'queued'
-                ? 'Analisi intelligente accodata: chunk ed embedding saranno generati dopo estrazione, OCR e controllo qualità.'
-                : indexState === 'indexing'
-                ? 'Analisi intelligente in corso: preparo pagine, chunk ed embedding senza bloccare la revisione.'
+              {indexState === 'queued' || indexState === 'indexing'
+                ? 'Analisi intelligente in coda: non blocca la revisione.'
                 : indexState === 'indexed'
-                  ? 'Analisi intelligente completata: il documento è pronto per retrieval e citazioni.'
-                  : 'Il PDF è salvo, ma l’analisi intelligente non è terminata. Potrà essere rilanciata dalla libreria.'}
+                  ? 'Analisi intelligente completata.'
+                  : 'Analisi intelligente non terminata: potrai rilanciarla dalla libreria.'}
             </p>
           ) : null}
           {deckState !== 'idle' ? (
             <p className={`upload-cloud-state is-${deckState === 'saved' ? 'saved' : deckState === 'failed' ? 'failed' : 'saving'}`}>
               {deckState === 'saving'
-                ? 'Salvataggio delle flashcard approvate nel deck personale…'
+                ? 'Salvataggio flashcard generate…'
                 : deckState === 'saved'
-                  ? 'Flashcard approvate salvate con documento, pagina, chunk e sezione.'
-                  : 'Il documento è salvo, ma alcune flashcard approvate non sono state persistite. Potrai rigenerarle dalla libreria.'}
+                  ? 'Flashcard salvate: le trovi nell’area Studio.'
+                  : 'Documento salvo; alcune flashcard non sono state persistite.'}
             </p>
           ) : null}
           <div className="upload-success-stats">
             <div>
               <strong><CreditIcon size="lg" /> {earned > 0 ? `+${earned}` : 'In attesa'}</strong>
-              <span>{earned > 0 ? 'crediti demo accreditati' : 'premio dopo approvazione'}</span>
+              <span>{earned > 0 ? 'crediti demo' : 'premio dopo approvazione'}</span>
             </div>
             <div>
               <strong>{compression ? (compression.alreadyOptimized ? '0%' : `−${compression.savedPct}%`) : '—'}</strong>
-              <span>peso PDF (lossless)</span>
+              <span>peso PDF</span>
             </div>
-            <div><strong>{approvedCount}</strong><span>flashcard approvate</span></div>
-            <div><strong>{analysis ? analysis.ocrPages.length : 0}</strong><span>pagine in coda OCR</span></div>
+            <div><strong>{analysis?.pageCount ?? '—'}</strong><span>pagine</span></div>
+            <div><strong>{includedCards.length}</strong><span>flashcard generate</span></div>
           </div>
           <div className="upload-success-actions">
             <button className="primary-action" onClick={() => onRoute('dashboard')} type="button">
@@ -6300,606 +6181,490 @@ function UploadPage({
           </div>
         </section>
       ) : (
-        <section className="upload-form-card upload-workspace">
-          <div className="processing-options">
-            <label><input checked={doCompress} onChange={(event) => setDoCompress(event.target.checked)} type="checkbox" /> Compressione lossless</label>
-            <label><input checked={doOcr} onChange={(event) => setDoOcr(event.target.checked)} type="checkbox" /> OCR selettivo</label>
-            <label><input checked={doFlashcards} onChange={(event) => changeFlashcardOption(event.target.checked)} type="checkbox" /> Flashcard automatiche Premium</label>
-            {isSupabaseConfigured ? (
-              // Il piano arriva dall'entitlement reale (user_entitlements): qui
-              // si mostra soltanto, l'upgrade passa dalla pagina Premium.
-              premium ? (
-                <span className="mode-active plan-badge"><Crown size={16} /> Premium attivo</span>
-              ) : (
-                <button className="plan-upgrade" onClick={() => onRoute('premium')} type="button">
-                  <Crown size={16} /> Passa a Premium
+        <section className="upload-wizard" aria-label="Procedura guidata di caricamento">
+          <nav className="upload-wizard-steps" aria-label="Passaggi">
+            {wizardSteps.map((step, index) => {
+              const done =
+                (step.id === 0 && fileReady) ||
+                (step.id === 1 && step1Ready) ||
+                (step.id === 2 && step2Ready) ||
+                (step.id === 3 && canPublish)
+              const active = wizardStep === step.id
+              return (
+                <button
+                  key={step.id}
+                  type="button"
+                  className={`upload-wizard-step ${active ? 'is-active' : ''} ${done ? 'is-done' : ''}`}
+                  onClick={() => goWizard(step.id)}
+                  aria-current={active ? 'step' : undefined}
+                >
+                  <span className="upload-wizard-step-num">{done && !active ? <CheckCircle2 size={16} /> : index + 1}</span>
+                  <span className="upload-wizard-step-copy">
+                    <strong>{step.label}</strong>
+                    <small>{step.hint}</small>
+                  </span>
                 </button>
               )
-            ) : (
-              <>
-                <button className={premium ? '' : 'mode-active'} onClick={() => changeMode(false)} type="button"><Layers size={16} /> Free tools</button>
-                <button className={premium ? 'mode-active' : ''} onClick={() => changeMode(true)} type="button"><Crown size={16} /> Premium</button>
-              </>
-            )}
-          </div>
+            })}
+          </nav>
 
-          {!file ? (
-            <label
-              className={`upload-drop ${dragging ? 'dragging' : ''}`}
-              onDragLeave={() => setDragging(false)}
-              onDragOver={(event) => {
-                event.preventDefault()
-                setDragging(true)
-              }}
-              onDrop={(event) => {
-                event.preventDefault()
-                setDragging(false)
-                acceptFile(event.dataTransfer.files?.[0])
-              }}
-            >
-              <input
-                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                hidden
-                onChange={(event) => acceptFile(event.target.files?.[0])}
-                ref={fileInputRef}
-                type="file"
-              />
-              <Upload size={28} />
-              Trascina qui il PDF o Word
-              <small>PDF consigliato · DOC/DOCX convertiti in PDF prima della revisione · Max 25 MB</small>
-            </label>
-          ) : (
-            <div className="upload-file">
-              <span className="upload-file-icon"><FileText size={22} /></span>
-              <div className="upload-file-meta">
-                <strong>{file.name}</strong>
-                <small>
-                  {formatBytes(compression ? compression.compressedBytes : file.size)}
-                  {analysis ? ` · ${analysis.pageCount} pagine` : ''}
-                  {phase === 'processing' ? ' · elaborazione…' : ''}
-                </small>
-              </div>
-              <button className="upload-file-remove" onClick={resetAll} type="button" aria-label="Rimuovi file">
-                <X size={18} />
-              </button>
-            </div>
-          )}
-
-          {error ? (
-            <p className="upload-error"><AlertTriangle size={16} /> {error}</p>
-          ) : null}
-
-          {isWordUpload ? (
-            <div className="word-conversion-warning" role="note">
-              <AlertTriangle size={18} />
-              <div>
-                <strong>Word accettato, ma il PDF resta il formato migliore.</strong>
-                <p>
-                  Il file verra convertito lato backend con LibreOffice headless prima della revisione. Impaginazione,
-                  font, tabelle o immagini molto complesse possono cambiare leggermente: controlla sempre il PDF finale
-                  generato prima della pubblicazione. UnimiDoc non garantisce la fedelta perfetta del layout Word e non
-                  risponde di eventuali artefatti dovuti alla conversione.
-                </p>
-              </div>
-            </div>
-          ) : null}
-
-          {analysis && phase === 'ready' && !file ? (
-            <div className="local-reader-resume" role="note">
-              <BookOpen size={18} />
-              <div>
-                <strong>Bozza reader ripristinata su questo dispositivo.</strong>
-                <p>
-                  Puoi continuare ricerca, evidenziazioni, note ed export senza ricaricare il PDF. Per inviare in
-                  revisione o comprimere il file, carica di nuovo il documento originale.
-                </p>
-              </div>
-              <button onClick={resetAll} type="button">Chiudi bozza</button>
-            </div>
-          ) : null}
-
-          {steps.length ? (
-            <ol className="pipeline">
-              {steps.map((step) => (
-                <li className={`pipeline-step ${step.status}`} key={step.key}>
-                  <span className="pipeline-icon"><PipelineIcon status={step.status} /></span>
-                  <div>
-                    <strong>{step.label}</strong>
-                    <small>{step.detail}</small>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          ) : null}
-
-          {analysis && phase === 'ready' ? (
-            <div className="upload-workspace-tabs" role="tablist" aria-label="Sezioni del caricamento">
-              <button
-                role="tab"
-                aria-selected={workspaceTab === 'dati'}
-                className={workspaceTab === 'dati' ? 'active' : ''}
-                onClick={() => setWorkspaceTab('dati')}
-                type="button"
-              >
-                <FileText size={16} /> Dati del documento
-              </button>
-              <button
-                role="tab"
-                aria-selected={workspaceTab === 'strumenti'}
-                className={workspaceTab === 'strumenti' ? 'active' : ''}
-                onClick={() => setWorkspaceTab('strumenti')}
-                type="button"
-              >
-                <Sparkles size={16} /> Strumenti di studio
-              </button>
-            </div>
-          ) : null}
-
-          {analysis && phase === 'ready' && workspaceTab === 'strumenti' && !premium ? (
-            <div className="free-study-tools-grid">
-              <FreeStudyToolsPanel
-                analysis={analysis}
-                onPremium={() => (isSupabaseConfigured ? onRoute('premium') : changeMode(true))}
-                storageKey={freeReaderStorageKey}
-                title={freeReaderTitle}
-              />
-              <ImageOcclusionLab analysis={analysis} premium={premium} />
-            </div>
-          ) : null}
-
-          {doFlashcards && analysis && phase === 'ready' && workspaceTab === 'strumenti' && premium ? (
-            <div className="learning-review-grid">
-              <div className="flashcards-review">
-                <div className="flashcards-head">
-                  <div>
-                    <h3><BrainCircuit size={18} /> Flashcard da approvare</h3>
-                    <small>{includedCards.length} pronte · {flashcardModeName} · modifica o rimuovi prima dell’invio</small>
-                  </div>
-                  <div className="flashcards-actions">
-                    <button disabled={rebuilding} onClick={regenerate} type="button">
-                      <RefreshCw className={rebuilding ? 'spin' : ''} size={15} /> Rigenera
-                    </button>
-                    <button onClick={addCard} type="button"><Plus size={15} /> Aggiungi</button>
-                  </div>
+          <div className="upload-wizard-panel">
+            {wizardStep === 0 ? (
+              <div className="upload-wizard-pane" data-step="file">
+                <div className="upload-wizard-pane-head">
+                  <h2>1 · Carica il file</h2>
+                  <p>PDF consigliato. DOC/DOCX vengono convertiti prima della revisione. Massimo 25 MB.</p>
                 </div>
-                <p className={`flashcard-mode-note ${premium ? 'premium' : 'base'}`}>
-                  {premium ? <Sparkles size={15} /> : <ShieldCheck size={15} />}
-                  <span>{flashcardModeNote}</span>
-                </p>
-                {cards.length && currentReviewCard ? (
-                  <div className="flashcard-carousel">
-                    <div className="flashcard-carousel-top">
-                      <button
-                        disabled={safeReviewCardIndex === 0}
-                        onClick={() => setReviewCardIndex((value) => Math.max(0, value - 1))}
-                        type="button"
-                        aria-label="Flashcard precedente"
-                      >
-                        <ChevronLeft size={16} />
+
+                <div className="upload-process-toggles" aria-label="Opzioni di elaborazione">
+                  <label><input checked={doCompress} onChange={(event) => setDoCompress(event.target.checked)} type="checkbox" /> Compressione lossless</label>
+                  <label><input checked={doOcr} onChange={(event) => setDoOcr(event.target.checked)} type="checkbox" /> OCR selettivo</label>
+                  <label><input checked={doFlashcards} onChange={(event) => changeFlashcardOption(event.target.checked)} type="checkbox" /> Flashcard Premium (se attive)</label>
+                  {isSupabaseConfigured ? (
+                    premium ? (
+                      <span className="mode-active plan-badge"><Crown size={16} /> Premium attivo</span>
+                    ) : (
+                      <button className="plan-upgrade" onClick={() => onRoute('premium')} type="button">
+                        <Crown size={16} /> Premium
                       </button>
-                      <div>
-                        <strong>Card {safeReviewCardIndex + 1} di {cards.length}</strong>
-                        <span>{approvedCount} approvate · {includedCards.length} complete</span>
-                      </div>
-                      <button
-                        disabled={safeReviewCardIndex === cards.length - 1}
-                        onClick={() => setReviewCardIndex((value) => Math.min(cards.length - 1, value + 1))}
-                        type="button"
-                        aria-label="Flashcard successiva"
-                      >
-                        <ChevronRight size={16} />
-                      </button>
+                    )
+                  ) : null}
+                </div>
+
+                {!file ? (
+                  <label
+                    className={`upload-drop ${dragging ? 'dragging' : ''}`}
+                    onDragLeave={() => setDragging(false)}
+                    onDragOver={(event) => {
+                      event.preventDefault()
+                      setDragging(true)
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      setDragging(false)
+                      acceptFile(event.dataTransfer.files?.[0])
+                    }}
+                  >
+                    <input
+                      accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      hidden
+                      onChange={(event) => acceptFile(event.target.files?.[0])}
+                      ref={fileInputRef}
+                      type="file"
+                    />
+                    <Upload size={32} />
+                    <strong>Trascina qui il PDF o Word</strong>
+                    <small>oppure clicca per scegliere dal dispositivo</small>
+                  </label>
+                ) : (
+                  <div className="upload-file">
+                    <span className="upload-file-icon"><FileText size={22} /></span>
+                    <div className="upload-file-meta">
+                      <strong>{file.name}</strong>
+                      <small>
+                        {formatBytes(compression ? compression.compressedBytes : file.size)}
+                        {analysis ? ` · ${analysis.pageCount} pagine` : ''}
+                        {phase === 'processing' ? ' · elaborazione…' : ''}
+                        {compression ? ` · ${compressionBadge}` : ''}
+                      </small>
                     </div>
+                    <button className="upload-file-remove" onClick={resetAll} type="button" aria-label="Rimuovi file">
+                      <X size={18} />
+                    </button>
+                  </div>
+                )}
 
-                    <article className={`flashcard-editor-card ${approvedCardIds.has(currentReviewCard.id) ? 'approved' : ''}`}>
-                      <div className="flashcard-editor-head">
-                        <span className={`flashcard-tag ${currentReviewCard.source}`}>{flashcardSourceLabels[currentReviewCard.source]}</span>
-                        <span>Score {Math.round(currentReviewCard.score * 100)}</span>
-                      </div>
-                      <label>
-                        Domanda
-                        <input
-                          onChange={(event) => updateCard(currentReviewCard.id, { front: event.target.value })}
-                          placeholder="Domanda o termine"
-                          value={currentReviewCard.front}
-                        />
-                      </label>
-                      <label>
-                        Risposta
-                        <textarea
-                          onChange={(event) => updateCard(currentReviewCard.id, { back: event.target.value })}
-                          placeholder="Risposta o definizione"
-                          rows={4}
-                          value={currentReviewCard.back}
-                        />
-                      </label>
-                      <label>
-                        Tag
-                        <select
-                          onChange={(event) => updateCard(currentReviewCard.id, { source: event.target.value as Flashcard['source'] })}
-                          value={currentReviewCard.source}
-                        >
-                          {Object.entries(flashcardSourceLabels).map(([key, label]) => (
-                            <option key={key} value={key}>{label}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <div className="flashcard-editor-source">
-                        {currentReviewCard.ref ? (
-                          <span><Eye size={14} /> p. {currentReviewCard.ref.page}{currentReviewCard.ref.section ? ` · ${currentReviewCard.ref.section}` : ''}</span>
-                        ) : (
-                          <span><PencilLine size={14} /> Card manuale</span>
-                        )}
-                      </div>
-                      <div className="flashcard-editor-actions">
-                        <button
-                          className={approvedCardIds.has(currentReviewCard.id) ? 'approved' : ''}
-                          onClick={() => toggleApproveCard(currentReviewCard.id)}
-                          type="button"
-                        >
-                          <CheckCircle2 size={15} />
-                          {approvedCardIds.has(currentReviewCard.id) ? 'Approvata' : 'Approva'}
-                        </button>
-                        <button onClick={() => removeCard(currentReviewCard.id)} type="button">
-                          <Trash2 size={15} /> Elimina
-                        </button>
-                      </div>
-                    </article>
-
-                    <div className="flashcard-rail" aria-label="Navigazione flashcard">
-                      {cards.map((card, index) => (
-                        <button
-                          className={`${index === safeReviewCardIndex ? 'active' : ''} ${approvedCardIds.has(card.id) ? 'approved' : ''} ${card.front.trim() && card.back.trim() ? 'complete' : 'incomplete'}`}
-                          key={card.id}
-                          onClick={() => setReviewCardIndex(index)}
-                          title={card.front || `Card ${index + 1}`}
-                          type="button"
-                        >
-                          <span>{index + 1}</span>
-                          <em>{flashcardSourceLabels[card.source]}</em>
-                        </button>
-                      ))}
+                {isWordUpload ? (
+                  <div className="word-conversion-warning" role="note">
+                    <AlertTriangle size={18} />
+                    <div>
+                      <strong>Word accettato: il PDF resta il formato migliore.</strong>
+                      <p>
+                        La conversione può alterare leggermente layout e font. Controlla il PDF generato prima della pubblicazione.
+                      </p>
                     </div>
                   </div>
-                ) : (
-                  <p className="flashcards-empty">
-                    Nessuna flashcard automatica: testo insufficiente o disattivate. Puoi aggiungerne a mano.
-                  </p>
-                )}
-                {includedCards.length ? (
-                  <button className="study-launch" onClick={() => setStudyOpen(true)} type="button">
-                    <GraduationCap size={18} /> Studia deck, quiz e fonte
-                  </button>
                 ) : null}
-              </div>
-              <FlashcardGenerationSummary analysis={analysis} cards={includedCards} steps={steps} />
-              <ImageOcclusionLab analysis={analysis} premium={premium} />
-            </div>
-          ) : null}
 
-          {phase !== 'ready' || workspaceTab === 'dati' ? (
-          <div className="upload-data-section">
-          <div className="upload-data-panel">
-            <div className="upload-data-head">
-              <div>
-                <h2>Dati del documento</h2>
-                <p>Tre passaggi: informazioni essenziali, dettagli del corso, presentazione. Corso e docenti arrivano dal catalogo ufficiale UniMi.</p>
-              </div>
-              <span>{DEGREE_PROGRAMS.length} corsi UniMi</span>
-            </div>
+                {analysis && phase === 'ready' && !file ? (
+                  <div className="local-reader-resume" role="note">
+                    <BookOpen size={18} />
+                    <div>
+                      <strong>Bozza locale ripristinata.</strong>
+                      <p>Per inviare in revisione ricarica il file originale.</p>
+                    </div>
+                    <button onClick={resetAll} type="button">Chiudi bozza</button>
+                  </div>
+                ) : null}
 
-            <div aria-label="Completamento dei dati richiesti" className="upload-checklist" role="status">
-              <span className={title.trim().length >= 3 ? 'done' : ''}>
-                {title.trim().length >= 3 ? <CheckCircle2 size={14} /> : <i className="upload-checklist-dot" />} Titolo
-              </span>
-              <span className={professor.trim() ? 'done' : ''}>
-                {professor.trim() ? <CheckCircle2 size={14} /> : <i className="upload-checklist-dot" />} Docente
-              </span>
-              <span className={rights ? 'done' : ''}>
-                {rights ? <CheckCircle2 size={14} /> : <i className="upload-checklist-dot" />} Titolarità
-              </span>
-              <em><CreditIcon size="xs" /> Prezzo suggerito: {uploadPriceCredits} crediti</em>
-            </div>
-
-            <fieldset className="upload-fieldset">
-              <legend><span className="upload-step-badge">1</span> Informazioni essenziali</legend>
-              <div className="form-grid refined">
-                <label className="field-wide field-full">
-                  <span className="field-label-row">Titolo <em className="field-required">obbligatorio</em></span>
-                  <input
-                    maxLength={180}
-                    onChange={(event) => setTitle(event.target.value)}
-                    placeholder="Es. Riassunto di Genetica molecolare"
-                    value={title}
-                  />
-                  <small className="field-counter">{title.trim().length}/180 · minimo 3 caratteri</small>
-                </label>
-                <label className="field-wide">
-                  <span className="field-label-row">Corso di laurea <em className="field-required">obbligatorio</em></span>
-                  <select onChange={(event) => changeDegree(event.target.value)} value={degreeSlug}>
-                    {degreeProgramsByArea().map(({ area, programs }) => (
-                      <optgroup key={area} label={area}>
-                        {programs.map((program) => (
-                          <option key={program.slug} value={program.slug}>
-                            {program.name} ({program.classe})
-                          </option>
-                        ))}
-                      </optgroup>
+                {steps.length ? (
+                  <ol className="pipeline pipeline-compact">
+                    {steps.map((step) => (
+                      <li className={`pipeline-step ${step.status}`} key={step.key}>
+                        <span className="pipeline-icon"><PipelineIcon status={step.status} /></span>
+                        <div>
+                          <strong>{step.label}</strong>
+                          <small>{step.detail}</small>
+                        </div>
+                      </li>
                     ))}
-                  </select>
-                </label>
-                <label className="field-wide">
-                  <span className="field-label-row">Materia <em className="field-required">obbligatorio</em></span>
-                  {isCatalogDegree ? (
-                    <select onChange={(event) => setSubject(event.target.value)} value={subject}>
-                      {subjects.map((option) => (
-                        <option key={option}>{option}</option>
-                      ))}
-                    </select>
-                  ) : dbCourses.length > 0 && !freeSubject ? (
-                    <select
-                      onChange={(event) => {
-                        if (event.target.value === '__free__') {
-                          setFreeSubject(true)
-                          setSubject('')
-                        } else {
-                          setSubject(event.target.value)
-                        }
-                        setProfessor('')
-                      }}
-                      value={subject}
-                    >
-                      {dbCoursesByYear.map(([label, list]) => (
-                        <optgroup key={label} label={label}>
-                          {list.map((course) => (
-                            <option key={course.id} value={course.name}>
-                              {course.name}
-                              {course.cfu ? ` · ${course.cfu} CFU` : ''}
+                  </ol>
+                ) : (
+                  <ul className="upload-quiet-perks">
+                    <li><FileArchive size={16} /> Compressione senza perdita di qualità</li>
+                    <li><ScanLine size={16} /> OCR solo sulle pagine scansionate</li>
+                    <li><ShieldCheck size={16} /> Revisione umana prima della pubblicazione</li>
+                  </ul>
+                )}
+              </div>
+            ) : null}
+
+            {wizardStep === 1 ? (
+              <div className="upload-wizard-pane" data-step="essentials">
+                <div className="upload-wizard-pane-head">
+                  <h2>2 · Informazioni essenziali</h2>
+                  <p>Questi campi guidano ricerca e catalogo. Usa il corso ufficiale UniMi quando possibile.</p>
+                </div>
+                <div className="form-grid refined upload-wizard-grid">
+                  <label className="field-wide field-full">
+                    <span className="field-label-row">Titolo <em className="field-required">obbligatorio</em></span>
+                    <input
+                      maxLength={180}
+                      onChange={(event) => setTitle(event.target.value)}
+                      placeholder="Es. Riassunto di Genetica molecolare"
+                      value={title}
+                    />
+                    <small className="field-counter">{title.trim().length}/180 · minimo 3 caratteri</small>
+                  </label>
+                  <label className="field-wide">
+                    <span className="field-label-row">Corso di laurea <em className="field-required">obbligatorio</em></span>
+                    <select onChange={(event) => changeDegree(event.target.value)} value={degreeSlug}>
+                      {degreeProgramsByArea().map(({ area, programs }) => (
+                        <optgroup key={area} label={area}>
+                          {programs.map((program) => (
+                            <option key={program.slug} value={program.slug}>
+                              {program.name} ({program.classe})
                             </option>
                           ))}
                         </optgroup>
                       ))}
-                      <option value="__free__">Altra materia (testo libero)…</option>
                     </select>
-                  ) : (
-                    <>
-                      <input
-                        maxLength={120}
-                        onChange={(event) => setSubject(event.target.value)}
-                        placeholder="Es. Anatomia umana, Diritto privato, Analisi 1"
-                        value={subject}
-                      />
-                      {dbCourses.length > 0 ? (
-                        <button
-                          className="linklike-button"
-                          onClick={() => {
-                            setFreeSubject(false)
-                            setSubject(dbCourses[0]?.name ?? '')
-                            setProfessor('')
-                          }}
-                          type="button"
-                        >
-                          Torna all’elenco materie del corso
-                        </button>
-                      ) : null}
-                    </>
-                  )}
-                </label>
-              </div>
-
-              {selectedCourse ? (
-                <div className="course-match-card">
-                  <SubjectIcon name={selectedCourse.name} />
-                  <div>
-                    <strong>{selectedCourse.shortName}</strong>
-                    <small>{selectedCourseMeta}</small>
-                    {selectedCourse.cohortNote ? <em>{selectedCourse.cohortNote}</em> : null}
-                  </div>
-                </div>
-              ) : dbSelectedCourse ? (
-                <div className="course-match-card">
-                  <BookOpen size={18} />
-                  <div>
-                    <strong>{dbSelectedCourse.name}</strong>
-                    <small>
-                      {[
-                        dbSelectedCourse.yearLabel ?? (dbSelectedCourse.yearNumber > 0 ? `Anno ${dbSelectedCourse.yearNumber}` : null),
-                        dbSelectedCourse.cfu ? `${dbSelectedCourse.cfu} CFU` : null,
-                        dbSelectedCourse.ssd,
-                        dbSelectedCourse.period,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </small>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="teacher-picker">
-                <div className={isCatalogDegree ? 'teacher-picker-row' : 'teacher-picker-row single'}>
-                  {isCatalogDegree ? (
-                    <label>
-                      Linea / edizione
-                      <select
-                        disabled={courseLines.length === 0}
-                        onChange={(event) => setCourseLine(event.target.value as CourseLine | 'Tutti')}
-                        value={courseLine}
-                      >
-                        <option value="Tutti">Tutte</option>
-                        {courseLines.map((line) => (
-                          <option key={line} value={line}>{line}</option>
+                  </label>
+                  <label className="field-wide">
+                    <span className="field-label-row">Materia <em className="field-required">obbligatorio</em></span>
+                    {isCatalogDegree ? (
+                      <select onChange={(event) => setSubject(event.target.value)} value={subject}>
+                        {subjects.map((option) => (
+                          <option key={option}>{option}</option>
                         ))}
                       </select>
+                    ) : dbCourses.length > 0 && !freeSubject ? (
+                      <select
+                        onChange={(event) => {
+                          if (event.target.value === '__free__') {
+                            setFreeSubject(true)
+                            setSubject('')
+                          } else {
+                            setSubject(event.target.value)
+                          }
+                          setProfessor('')
+                        }}
+                        value={subject}
+                      >
+                        {dbCoursesByYear.map(([label, list]) => (
+                          <optgroup key={label} label={label}>
+                            {list.map((course) => (
+                              <option key={course.id} value={course.name}>
+                                {course.name}
+                                {course.cfu ? ` · ${course.cfu} CFU` : ''}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                        <option value="__free__">Altra materia (testo libero)…</option>
+                      </select>
+                    ) : (
+                      <>
+                        <input
+                          maxLength={120}
+                          onChange={(event) => setSubject(event.target.value)}
+                          placeholder="Es. Anatomia umana, Diritto privato, Analisi 1"
+                          value={subject}
+                        />
+                        {dbCourses.length > 0 ? (
+                          <button
+                            className="linklike-button"
+                            onClick={() => {
+                              setFreeSubject(false)
+                              setSubject(dbCourses[0]?.name ?? '')
+                              setProfessor('')
+                            }}
+                            type="button"
+                          >
+                            Torna all’elenco materie del corso
+                          </button>
+                        ) : null}
+                      </>
+                    )}
+                  </label>
+                </div>
+                {selectedCourse ? (
+                  <div className="course-match-card">
+                    <SubjectIcon name={selectedCourse.name} />
+                    <div>
+                      <strong>{selectedCourse.shortName}</strong>
+                      <small>{selectedCourseMeta}</small>
+                    </div>
+                  </div>
+                ) : dbSelectedCourse ? (
+                  <div className="course-match-card">
+                    <BookOpen size={18} />
+                    <div>
+                      <strong>{dbSelectedCourse.name}</strong>
+                      <small>
+                        {[
+                          dbSelectedCourse.yearLabel ?? (dbSelectedCourse.yearNumber > 0 ? `Anno ${dbSelectedCourse.yearNumber}` : null),
+                          dbSelectedCourse.cfu ? `${dbSelectedCourse.cfu} CFU` : null,
+                          dbSelectedCourse.ssd,
+                        ].filter(Boolean).join(' · ')}
+                      </small>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {wizardStep === 2 ? (
+              <div className="upload-wizard-pane" data-step="details">
+                <div className="upload-wizard-pane-head">
+                  <h2>3 · Dettagli del corso</h2>
+                  <p>Docente e contesto aiutano chi cerca materiale per il proprio esame.</p>
+                </div>
+                <div className="teacher-picker">
+                  <div className={isCatalogDegree ? 'teacher-picker-row' : 'teacher-picker-row single'}>
+                    {isCatalogDegree ? (
+                      <label>
+                        Linea / edizione
+                        <select
+                          disabled={courseLines.length === 0}
+                          onChange={(event) => setCourseLine(event.target.value as CourseLine | 'Tutti')}
+                          value={courseLine}
+                        >
+                          <option value="Tutti">Tutte</option>
+                          {courseLines.map((line) => (
+                            <option key={line} value={line}>{line}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    <label>
+                      <span className="field-label-row">Docente <em className="field-required">obbligatorio</em></span>
+                      <input
+                        list="upload-professor-suggestions"
+                        onChange={(event) => setProfessor(event.target.value)}
+                        placeholder={isCatalogDegree ? 'Scrivi o scegli un docente' : 'Nome e cognome del docente'}
+                        value={professor}
+                      />
                     </label>
-                  ) : null}
+                  </div>
+                  <datalist id="upload-professor-suggestions">
+                    {professorSuggestions.map((option) => (
+                      <option key={option} value={option} />
+                    ))}
+                  </datalist>
+                  {suggestedProfessors.length ? (
+                    <div className="professor-suggestion-chips" aria-label="Docenti suggeriti">
+                      {suggestedProfessors.map((option) => (
+                        <button
+                          className={professor === option ? 'selected' : ''}
+                          key={option}
+                          onClick={() => setProfessor(option)}
+                          type="button"
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="manual-professor-note">
+                      Indica il docente come compare sul materiale o sul sito del corso.
+                    </p>
+                  )}
+                </div>
+                <div className="form-grid refined upload-wizard-grid">
                   <label>
-                    <span className="field-label-row">Docente <em className="field-required">obbligatorio</em></span>
+                    Anno accademico
+                    <select onChange={(event) => setYear(event.target.value)} value={year}>
+                      {academicYears.map((option) => (
+                        <option key={option}>{option}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Tipo materiale
+                    <select onChange={(event) => setDocType(event.target.value)} value={docType}>
+                      {documentTypes.map((option) => (
+                        <option key={option}>{option}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Tipo di esame
+                    <select onChange={(event) => setExamType(event.target.value)} value={examType}>
+                      {EXAM_TYPES.map((option) => (
+                        <option key={option}>{option}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Semestre
+                    <select onChange={(event) => setSemester(event.target.value)} value={semester}>
+                      <option value="">Non specificato</option>
+                      <option>1 semestre</option>
+                      <option>2 semestre</option>
+                      <option>Annuale</option>
+                    </select>
+                  </label>
+                </div>
+                <p className="upload-fixed-meta">
+                  <Lock size={13} /> {degreeCourseLabel(degreeProgram)} · {UNIVERSITY_NAME}
+                </p>
+              </div>
+            ) : null}
+
+            {wizardStep === 3 ? (
+              <div className="upload-wizard-pane" data-step="review">
+                <div className="upload-wizard-pane-head">
+                  <h2>4 · Riepilogo e invio</h2>
+                  <p>Controlla i dati, aggiungi una descrizione se vuoi, dichiara la titolarità e invia in revisione.</p>
+                </div>
+
+                <div className="upload-review-card" aria-label="Riepilogo">
+                  <div>
+                    <span>File</span>
+                    <strong>{file?.name ?? (analysis ? 'Bozza locale (ricarica il file per inviare)' : 'Nessun file')}</strong>
+                  </div>
+                  <div>
+                    <span>Titolo</span>
+                    <strong>{title.trim() || '—'}</strong>
+                  </div>
+                  <div>
+                    <span>Corso / materia</span>
+                    <strong>{degreeProgram.name} · {subject || '—'}</strong>
+                  </div>
+                  <div>
+                    <span>Docente</span>
+                    <strong>{professor.trim() || '—'}</strong>
+                  </div>
+                  <div>
+                    <span>Prezzo suggerito</span>
+                    <strong>{uploadPriceCredits} crediti</strong>
+                  </div>
+                  {includedCards.length ? (
+                    <div>
+                      <span>Flashcard</span>
+                      <strong>{includedCards.length} generate (revisionabili in Studio)</strong>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="form-grid refined fieldset-stacked upload-wizard-grid">
+                  <label className="field-wide">
+                    Descrizione pubblica
+                    <textarea
+                      maxLength={2000}
+                      onChange={(event) => setDescription(event.target.value)}
+                      placeholder="Argomenti, organizzazione, livello. Niente contatti o link esterni."
+                      rows={3}
+                      value={description}
+                    />
+                    <small className="field-counter">{description.length}/2000</small>
+                  </label>
+                  <label className="field-wide">
+                    <span className="field-label-row">
+                      Tag <em className="field-optional">opzionale</em>
+                    </span>
                     <input
-                      list="upload-professor-suggestions"
-                      onChange={(event) => setProfessor(event.target.value)}
-                      placeholder={isCatalogDegree ? 'Scrivi o scegli un docente' : 'Nome e cognome del docente del corso'}
-                      value={professor}
+                      onChange={(event) => setTagsInput(event.target.value)}
+                      placeholder="Es. mitosi, ciclo cellulare, DNA"
+                      value={tagsInput}
                     />
                   </label>
                 </div>
-                <datalist id="upload-professor-suggestions">
-                  {professorSuggestions.map((option) => (
-                    <option key={option} value={option} />
-                  ))}
-                </datalist>
-                {suggestedProfessors.length ? (
-                  <div className="professor-suggestion-chips" aria-label="Docenti suggeriti per il corso">
-                    {suggestedProfessors.map((option) => (
-                      <button
-                        className={professor === option ? 'selected' : ''}
-                        key={option}
-                        onClick={() => setProfessor(option)}
-                        type="button"
-                      >
-                        {option}
-                      </button>
-                    ))}
-                  </div>
-                ) : isCatalogDegree ? (
-                  <p className="manual-professor-note">
-                    Nessun docente unico per questa attivita: indica il tutor o il riferimento che compare nel materiale.
-                  </p>
-                ) : dbSelectedCourse ? (
-                  <p className="manual-professor-note">
-                    Docenti non ancora pubblicati per questa attività: indica il docente del tuo anno così come compare
-                    sul materiale.
-                  </p>
-                ) : (
-                  <p className="manual-professor-note">
-                    Il catalogo docenti di {degreeProgram.name} è in preparazione: indica il docente così come compare
-                    sul materiale o sul sito del corso.
-                  </p>
-                )}
-              </div>
-            </fieldset>
 
-            <fieldset className="upload-fieldset">
-              <legend><span className="upload-step-badge">2</span> Dettagli del corso</legend>
-              <div className="form-grid refined">
-                <label>
-                  Anno accademico
-                  <select onChange={(event) => setYear(event.target.value)} value={year}>
-                    {academicYears.map((option) => (
-                      <option key={option}>{option}</option>
-                    ))}
-                  </select>
+                <label className="rights-check">
+                  <input checked={rights} onChange={(event) => setRights(event.target.checked)} type="checkbox" />
+                  Dichiaro che il materiale è mio o rielaborato in modo originale.
                 </label>
-                <label>
-                  Tipo materiale
-                  <select onChange={(event) => setDocType(event.target.value)} value={docType}>
-                    {documentTypes.map((option) => (
-                      <option key={option}>{option}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Tipo di esame
-                  <select onChange={(event) => setExamType(event.target.value)} value={examType}>
-                    {EXAM_TYPES.map((option) => (
-                      <option key={option}>{option}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Semestre
-                  <select onChange={(event) => setSemester(event.target.value)} value={semester}>
-                    <option value="">Non specificato</option>
-                    <option>1 semestre</option>
-                    <option>2 semestre</option>
-                    <option>Annuale</option>
-                  </select>
-                </label>
-              </div>
-              <p className="upload-fixed-meta">
-                <Lock size={13} /> {degreeCourseLabel(degreeProgram)} · {UNIVERSITY_NAME}
-              </p>
-            </fieldset>
 
-            <fieldset className="upload-fieldset">
-              <legend><span className="upload-step-badge">3</span> Presentazione</legend>
-              <div className="form-grid refined fieldset-stacked">
-                <label className="field-wide">
-                  Descrizione pubblica
-                  <textarea
-                    maxLength={2000}
-                    onChange={(event) => setDescription(event.target.value)}
-                    placeholder="Cosa contiene il materiale, argomenti trattati, come è organizzato. Niente contatti o link: le comunicazioni restano su UnimiDoc."
-                    rows={3}
-                    value={description}
-                  />
-                  <small className="field-counter">{description.length}/2000</small>
-                </label>
-                <label className="field-wide">
-                  <span className="field-label-row">
-                    Tag e parole chiave <em className="field-optional">opzionale · compilati in automatico</em>
-                  </span>
-                  <input
-                    onChange={(event) => setTagsInput(event.target.value)}
-                    placeholder="Es. mitosi, ciclo cellulare, DNA"
-                    value={tagsInput}
-                  />
-                </label>
+                <button className="primary-action upload-submit" disabled={!canPublish} onClick={() => void publish()} type="button">
+                  {cloudState === 'saving' || phase === 'processing' ? (
+                    <>
+                      <Loader2 className="spin" size={18} /> {cloudState === 'saving' ? 'Invio in corso…' : 'Elaborazione…'}
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck size={18} /> Invia in revisione
+                    </>
+                  )}
+                </button>
+                {!remoteUploadEnabled && !user?.isDemo ? (
+                  <small className="upload-hint" role="status">
+                    Nuovi caricamenti in pausa finché il worker di verifica non è operativo.
+                  </small>
+                ) : !canPublish ? (
+                  <small className="upload-hint">
+                    {!file
+                      ? 'Torna al passo 1 e carica il file originale per inviare.'
+                      : 'Completa titolo, materia, docente e dichiarazione di titolarità.'}
+                  </small>
+                ) : null}
               </div>
-            </fieldset>
+            ) : null}
+
+            {error ? (
+              <p className="upload-error"><AlertTriangle size={16} /> {error}</p>
+            ) : null}
+
+            <div className="upload-wizard-nav">
+              <button
+                type="button"
+                className="secondary-action"
+                disabled={wizardStep === 0}
+                onClick={goPrevWizard}
+              >
+                <ChevronLeft size={16} /> Indietro
+              </button>
+              <div className="upload-wizard-nav-status" aria-live="polite">
+                Passo {wizardStep + 1} di 4
+              </div>
+              {wizardStep < 3 ? (
+                <button type="button" className="primary-action" onClick={goNextWizard}>
+                  Continua <ChevronRight size={16} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="secondary-action"
+                  onClick={() => goWizard(0)}
+                >
+                  Modifica file
+                </button>
+              )}
+            </div>
           </div>
 
-          <label className="rights-check">
-            <input checked={rights} onChange={(event) => setRights(event.target.checked)} type="checkbox" /> Dichiaro che il
-            materiale è mio o rielaborato in modo originale.
-          </label>
-
-          <button className="primary-action upload-submit" disabled={!canPublish} onClick={() => void publish()} type="button">
-            {cloudState === 'saving' || phase === 'processing' ? (
-              <>
-                <Loader2 className="spin" size={18} /> {cloudState === 'saving' ? 'Verifica upload in corso…' : 'Elaborazione in corso…'}
-              </>
-            ) : (
-              <>
-                <ShieldCheck size={18} /> Invia in revisione
-              </>
-            )}
-          </button>
-          {!remoteUploadEnabled && !user?.isDemo ? (
-            <small className="upload-hint" role="status">
-              Nuovi caricamenti temporaneamente in pausa finché il worker di verifica PDF non è operativo: il file
-              resta soltanto nella bozza locale e non viene inviato.
-            </small>
-          ) : phase === 'ready' && !canPublish ? (
-            <small className="upload-hint">
-              {file
-                ? 'Completa titolo, docente e dichiarazione per inviare.'
-                : 'Questa è una bozza locale: ricarica il file originale per inviare in revisione.'}
-            </small>
-          ) : null}
-          </div>
-          ) : (
-            <p className="upload-tools-hint">
-              <Sparkles size={15} /> Quando hai finito con gli strumenti, torna a <button onClick={() => setWorkspaceTab('dati')} type="button">Dati del documento</button> per completare e inviare in revisione.
-            </p>
-          )}
+          <p className="upload-study-redirect">
+            <Sparkles size={15} /> Gli strumenti di studio (flashcard, reader, occlusion) sono nella{' '}
+            <button type="button" onClick={() => onRoute('dashboard')}>tua area personale</button>
+            {' '}dopo il caricamento, non in questa procedura.
+          </p>
         </section>
       )}
-
-      {studyOpen && analysis ? (
-        <FlashcardStudyModal
-          cards={includedCards}
-          documentAuthor={professor.trim() || 'Autore non indicato'}
-          documentId={null}
-          sentences={analysis.sentences}
-          subject={subject}
-          title={title || file?.name || 'Documento'}
-          user={user}
-          onClose={() => setStudyOpen(false)}
-        />
-      ) : null}
     </main>
   )
 }
+
 
 type DashboardView = 'overview' | 'library' | 'documents' | 'study' | 'progress' | 'credits' | 'creator'
 

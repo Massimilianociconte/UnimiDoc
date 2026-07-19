@@ -2808,10 +2808,313 @@ button {
   gap: 30px;
 }
 
-/* The upload flow is a workspace rather than a reading column: let its form,
-   document metadata and study tools use the available canvas at every size. */
+/* Upload is a centered guided flow: keep the canvas focused and symmetrical. */
 .upload-page.section-wrap {
-  width: min(100% - 48px, 1440px);
+  width: min(100% - 48px, 920px);
+  margin-inline: auto;
+  justify-items: stretch;
+}
+
+.upload-hero-centered {
+  grid-template-columns: 1fr;
+  text-align: center;
+  justify-items: center;
+  gap: 22px;
+  padding: 36px 32px 28px;
+}
+
+.upload-hero-centered .upload-hero-copy {
+  max-width: 38rem;
+}
+
+.upload-hero-centered img {
+  width: min(100%, 420px);
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+}
+
+.upload-kicker {
+  margin: 0 0 8px;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.upload-wizard {
+  display: grid;
+  gap: 18px;
+}
+
+.upload-wizard-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.upload-wizard-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 72px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.upload-wizard-step:hover {
+  border-color: rgba(22, 104, 69, 0.35);
+}
+
+.upload-wizard-step.is-active {
+  border-color: var(--primary);
+  background: #f4fcf7;
+  box-shadow: 0 0 0 1px rgba(22, 104, 69, 0.18);
+}
+
+.upload-wizard-step.is-done:not(.is-active) {
+  background: #fbfffc;
+}
+
+.upload-wizard-step-num {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--primary);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.upload-wizard-step-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.upload-wizard-step-copy strong {
+  color: var(--text-strong);
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.upload-wizard-step-copy small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.upload-wizard-panel {
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px;
+  background: #fff;
+  box-shadow: var(--shadow-soft);
+}
+
+.upload-wizard-pane {
+  display: grid;
+  gap: 18px;
+}
+
+.upload-wizard-pane-head {
+  text-align: center;
+  max-width: 36rem;
+  margin-inline: auto;
+}
+
+.upload-wizard-pane-head h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.upload-wizard-pane-head p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.upload-wizard-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.upload-wizard-grid .field-full {
+  grid-column: 1 / -1;
+}
+
+.upload-process-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: #fbfffc;
+}
+
+.upload-process-toggles label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-strong);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.upload-quiet-perks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.upload-quiet-perks li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+  background: #fbfffc;
+}
+
+.upload-quiet-perks svg {
+  color: var(--primary);
+  flex: 0 0 auto;
+}
+
+.pipeline-compact {
+  margin-top: 4px;
+}
+
+.upload-review-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(22, 104, 69, 0.16);
+  border-radius: 12px;
+  padding: 16px 18px;
+  background: linear-gradient(180deg, #f4fcf7, #fff);
+}
+
+.upload-review-card > div {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.35fr) minmax(0, 1fr);
+  gap: 10px 16px;
+  align-items: baseline;
+}
+
+.upload-review-card span {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 750;
+}
+
+.upload-review-card strong {
+  color: var(--text-strong);
+  font-size: 14.5px;
+  font-weight: 800;
+  word-break: break-word;
+}
+
+.upload-wizard-nav {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  align-items: center;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.upload-wizard-nav > :first-child {
+  justify-self: start;
+}
+
+.upload-wizard-nav > :last-child {
+  justify-self: end;
+}
+
+.upload-wizard-nav-status {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.upload-study-redirect {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  color: var(--muted);
+  background: #f7faf8;
+  font-size: 13.5px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.upload-study-redirect button {
+  border: 0;
+  background: none;
+  color: var(--primary-dark);
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+@media (max-width: 820px) {
+  .upload-wizard-steps {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .upload-quiet-perks {
+    grid-template-columns: 1fr;
+  }
+
+  .upload-wizard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .upload-review-card > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .upload-wizard-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .upload-wizard-nav > :first-child,
+  .upload-wizard-nav > :last-child {
+    justify-self: stretch;
+  }
+
+  .upload-wizard-nav-status {
+    order: -1;
+    text-align: center;
+  }
 }
 
 .dashboard-page {

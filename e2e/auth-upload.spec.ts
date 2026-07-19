@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-// Login demo + form di upload: corso di laurea, materia dal catalogo L-13 e
-// checklist dei campi obbligatori.
+// Login demo + procedura guidata di upload: corso di laurea e materia del catalogo.
 
 async function loginDemo(page: import('@playwright/test').Page) {
   await page.goto('/login')
@@ -15,11 +14,15 @@ test('il login demo porta alla dashboard', async ({ page }) => {
   await loginDemo(page)
 })
 
-test('il form di upload espone corso di laurea e materie del catalogo', async ({ page }) => {
+test('il wizard di upload espone corso di laurea e materie del catalogo', async ({ page }) => {
   await loginDemo(page)
   await page.goto('/upload')
 
-  // Selettore corso di laurea con tutte le aree della Statale.
+  // Stepper: passa al passo "Essenziali" (i dati non dipendono dal file).
+  await page.getByRole('button', { name: /Essenziali/i }).click()
+  await expect(page.getByRole('heading', { name: /Informazioni essenziali/i })).toBeVisible()
+
+  // Selettore corso di laurea con le aree della Statale.
   const degreeSelect = page.locator('select').filter({ has: page.locator('option', { hasText: 'Scienze biologiche' }) }).first()
   await expect(degreeSelect).toBeVisible()
 
@@ -35,5 +38,12 @@ test('il form di upload espone corso di laurea e materie del catalogo', async ({
 
   // Cambio corso: senza backend il catalogo DB è vuoto ⇒ materia a testo libero.
   await degreeSelect.selectOption({ label: 'Fisica (L-30)' })
-  await expect(page.locator('input[placeholder*="Anatomia umana"]')).toBeVisible()
+  const freeSubject = page.locator('input[placeholder*="Anatomia umana"]')
+  await expect(freeSubject).toBeVisible()
+  await freeSubject.fill('Fisica generale')
+  await page.getByPlaceholder(/Riassunto di Genetica/i).fill('Appunti di prova e2e')
+
+  // Navigazione wizard: Continua → dettagli docente.
+  await page.getByRole('button', { name: 'Continua' }).click()
+  await expect(page.getByRole('heading', { name: /Dettagli del corso/i })).toBeVisible()
 })
