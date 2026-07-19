@@ -2946,12 +2946,126 @@ button {
   line-height: 1.5;
 }
 
-.upload-wizard-grid {
+/* Wizard form: isolate from global .form-grid.refined (6-col spans). */
+.form-grid.refined.upload-wizard-grid {
+  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 16px;
 }
 
-.upload-wizard-grid .field-full {
+.form-grid.refined.upload-wizard-grid > label,
+.form-grid.refined.upload-wizard-grid > .field-wide,
+.form-grid.refined.upload-wizard-grid label:not(.field-wide) {
+  grid-column: auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.form-grid.refined.upload-wizard-grid .field-full,
+.form-grid.refined.upload-wizard-grid .field-wide.field-full {
   grid-column: 1 / -1;
+}
+
+/* Labels are NOT under .upload-form-card anymore — stack label → control. */
+.upload-wizard-panel label:not(.rights-check):not(.upload-process-toggles label) {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+  width: 100%;
+  color: var(--text-strong);
+  font-weight: 800;
+}
+
+.upload-wizard-panel input:not([type='checkbox']),
+.upload-wizard-panel select,
+.upload-wizard-panel textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  height: 54px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 14px;
+  background: #fff;
+  font: inherit;
+  color: var(--text-strong);
+}
+
+.upload-wizard-panel textarea {
+  height: auto;
+  min-height: 110px;
+  padding: 12px 14px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.upload-wizard-panel input:focus,
+.upload-wizard-panel select:focus,
+.upload-wizard-panel textarea:focus {
+  outline: 3px solid rgba(22, 104, 69, 0.12);
+  border-color: rgba(22, 104, 69, 0.45);
+}
+
+/* Keep "OBBLIGATORIO" next to the field name, not pushed to the far right. */
+.upload-wizard-pane .field-label-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: auto;
+  max-width: 100%;
+}
+
+.upload-wizard-pane .field-required {
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: #b42318;
+  background: #fef3f2;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+}
+
+.upload-wizard-pane .field-counter {
+  display: block;
+  margin-top: 0;
+}
+
+/* Teacher + line picker: two equal columns, full-width controls. */
+.upload-wizard-pane .teacher-picker {
+  display: grid;
+  gap: 12px;
+}
+
+.upload-wizard-pane .teacher-picker-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.42fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.upload-wizard-pane .teacher-picker-row.single {
+  grid-template-columns: 1fr;
+}
+
+.upload-wizard-pane .teacher-picker-row label {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.upload-wizard-pane .teacher-picker-row select,
+.upload-wizard-pane .teacher-picker-row input {
+  width: 100%;
+  min-width: 0;
+}
+
+.upload-wizard-pane .professor-suggestion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .upload-process-toggles {
@@ -2966,9 +3080,10 @@ button {
 }
 
 .upload-process-toggles label {
-  display: inline-flex;
+  display: inline-flex !important;
   align-items: center;
   gap: 8px;
+  width: auto;
   color: var(--text-strong);
   font-size: 13.5px;
   font-weight: 700;
@@ -3093,7 +3208,17 @@ button {
     grid-template-columns: 1fr;
   }
 
-  .upload-wizard-grid {
+  .form-grid.refined.upload-wizard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid.refined.upload-wizard-grid > label,
+  .form-grid.refined.upload-wizard-grid > .field-wide,
+  .form-grid.refined.upload-wizard-grid .field-full {
+    grid-column: 1 / -1;
+  }
+
+  .upload-wizard-pane .teacher-picker-row {
     grid-template-columns: 1fr;
   }
 
