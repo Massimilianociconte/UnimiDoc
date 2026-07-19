@@ -1,4 +1,6 @@
-import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
+// Prefer npm: over esm.sh — GitHub Actions occasionally gets 522 from esm CDN.
+// deno-lint-ignore no-import-prefix
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.45.4'
 import { config } from './env.ts'
 import { errors } from './http.ts'
 import { logError } from './log.ts'

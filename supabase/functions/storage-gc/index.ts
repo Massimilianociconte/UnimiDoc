@@ -11,7 +11,8 @@
 // endpoint. It never accepts caller-controlled input; it only processes the
 // internal queue with the service-role key Supabase injects into its env.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
+// deno-lint-ignore no-import-prefix
+import { createClient } from 'npm:@supabase/supabase-js@2.45.4'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''

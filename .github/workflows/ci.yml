@@ -41,12 +41,20 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      # Resolve npm: deps (stripe, …). Full */index.ts has historical body typing
-      # debt; shared modules + unit tests cover the critical surface in CI.
-      - run: deno check --node-modules-dir=auto _shared/*.ts
+      # Resolve npm: deps (stripe, supabase-js). Shared modules + unit tests only:
+      # full */index.ts still carries historical body typing debt.
+      - name: Deno check shared modules
         working-directory: supabase/functions
-      - run: deno test --allow-env --node-modules-dir=auto _shared/
+        run: |
+          for i in 1 2 3; do
+            deno check --node-modules-dir=auto _shared/*.ts && exit 0
+            echo "deno check attempt $i failed, retrying..."
+            sleep 5
+          done
+          exit 1
+      - name: Deno unit tests
         working-directory: supabase/functions
+        run: deno test --allow-env --node-modules-dir=auto _shared/
 
   # Migrazioni applicate da zero (coerenza) + suite pgTAP: RLS, isolamento
   # tra utenti, invarianti wallet, acquisti idempotenti, accesso RAG.
