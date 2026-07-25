@@ -146,6 +146,7 @@ import {
   EMPTY_FLASHCARD_FILTERS,
   flashcardProgressId,
   filterFlashcardRecords,
+  hasFlashcardLocalPersistenceFailure,
   isPersistedFlashcardId,
   loadRemoteFlashcardSrs,
   loadFlashcardDashboardData,
@@ -3656,6 +3657,7 @@ function FlashcardStudyModal({
   const [srsByCard, setSrsByCard] = useState<Record<string, SrsState>>(() => loadSrsMap(storageKey))
   const [favoriteByCard, setFavoriteByCard] = useState<Record<string, boolean>>({})
   const [qualityVoteByCard, setQualityVoteByCard] = useState<Record<string, FlashcardQualityVote>>({})
+  const [localSaveBlocked, setLocalSaveBlocked] = useState(false)
   const [aiHelpMessage, setAiHelpMessage] = useState('')
   const [aiHelpLoading, setAiHelpLoading] = useState(false)
   const readerRef = useRef<HTMLDivElement>(null)
@@ -3707,6 +3709,12 @@ function FlashcardStudyModal({
   const sourceCoverage = pages.length ? Math.round((referencedPages.size / pages.length) * 100) : 0
   const completedCount = Object.keys(responseLog).length
   const currentSrs = current ? srsByCard[current.id] : null
+  // M2: le card senza id UUID non passano mai dal backend — i loro progressi
+  // vivono solo in localStorage e vanno dichiarati come tali all'utente.
+  const localOnlyCardCount = useMemo(
+    () => cards.filter((card) => !isPersistedFlashcardId(card.id)).length,
+    [cards],
+  )
   const studyContext = useMemo(() => ({
     documentId,
     documentTitle: title || 'Documento',
@@ -3788,13 +3796,18 @@ function FlashcardStudyModal({
     remoteOutcomeByCard.current[current.id] = recordRemoteFlashcardOutcome(current.id, status)
   }
 
+  const recordOutcome = (status: AnswerStatus, srs?: SrsState | null) => {
+    recordLocalFlashcardOutcome(progressUserId, current, studyContext, status, srs)
+    setLocalSaveBlocked(hasFlashcardLocalPersistenceFailure())
+  }
+
   const submitTextAnswer = () => {
     const status = evaluateTextAnswer(userAnswer, current.back)
     if (status === 'unanswered') return
     setAnswerStatus(status)
     setRevealed(true)
     setResponseLog((currentLog) => ({ ...currentLog, [current.id]: status }))
-    recordLocalFlashcardOutcome(progressUserId, current, studyContext, status)
+    recordOutcome(status)
     queueRemoteOutcome(status)
   }
 
@@ -3802,7 +3815,7 @@ function FlashcardStudyModal({
     setAnswerStatus('unknown')
     setRevealed(true)
     setResponseLog((currentLog) => ({ ...currentLog, [current.id]: 'unknown' }))
-    recordLocalFlashcardOutcome(progressUserId, current, studyContext, 'incorrect')
+    recordOutcome('incorrect')
     queueRemoteOutcome('incorrect')
   }
 
@@ -3812,7 +3825,7 @@ function FlashcardStudyModal({
     setAnswerStatus(status)
     setRevealed(true)
     setResponseLog((currentLog) => ({ ...currentLog, [current.id]: status }))
-    recordLocalFlashcardOutcome(progressUserId, current, studyContext, status)
+    recordOutcome(status)
     queueRemoteOutcome(status)
   }
 
@@ -3822,7 +3835,7 @@ function FlashcardStudyModal({
     setAnswerStatus(status)
     setRevealed(true)
     setResponseLog((currentLog) => ({ ...currentLog, [current.id]: status }))
-    recordLocalFlashcardOutcome(progressUserId, current, studyContext, status)
+    recordOutcome(status)
     queueRemoteOutcome(status)
   }
 
@@ -3839,9 +3852,10 @@ function FlashcardStudyModal({
       return updated
     })
     if (answerStatus === 'unanswered') {
-      recordLocalFlashcardOutcome(progressUserId, current, studyContext, effectiveStatus, next)
+      recordOutcome(effectiveStatus, next)
     } else {
       updateLocalFlashcardSchedule(progressUserId, flashcardProgressId(current, studyContext), next)
+      setLocalSaveBlocked(hasFlashcardLocalPersistenceFailure())
     }
     if (isPersistedFlashcardId(current.id)) {
       // Serialize the immediate answer rollup with SRS scheduling. If that
@@ -3924,6 +3938,18 @@ function FlashcardStudyModal({
             <div>
               <strong>{reviewNote ? 'Ripasso mirato' : 'Studio flashcard'}</strong>
               <small>{title || 'Documento'}{reviewNote ? ` · ${reviewNote}` : ''}</small>
+              {localOnlyCardCount > 0 ? (
+                <span
+                  className="study-local-badge"
+                  title={localOnlyCardCount === cards.length
+                    ? 'Queste flashcard non sono sincronizzate con il tuo account: i progressi restano su questo dispositivo/browser.'
+                    : `${localOnlyCardCount} flashcard su ${cards.length} non sono sincronizzate con il tuo account: i loro progressi restano su questo dispositivo/browser.`}
+                >
+                  {localOnlyCardCount === cards.length
+                    ? 'Progressi solo su questo dispositivo'
+                    : `${localOnlyCardCount}/${cards.length} card solo su questo dispositivo`}
+                </span>
+              ) : null}
             </div>
           </div>
           <div className="study-top-tabs" aria-label="Sezioni studio">
@@ -3967,6 +3993,12 @@ function FlashcardStudyModal({
           </div>
 
           <div className="study-panel">
+            {localSaveBlocked ? (
+              <p className="study-persistence-warning" role="alert">
+                <AlertTriangle size={14} /> Il browser sta bloccando il salvataggio locale (navigazione privata o
+                spazio esaurito): i progressi di questa sessione andranno persi alla chiusura.
+              </p>
+            ) : null}
             <div className="study-counter">
               <span className={`study-tag ${current.source}`}>{flashcardSourceLabels[current.source]}</span>
               <span>{safeIndex + 1} / {cards.length}</span>
@@ -7159,11 +7191,11 @@ function UserDashboardPage({
                 <small>{view.hint}</small>
               </span>
               {view.key === 'study' && flashcardStats.needsReview > 0 ? (
-                <em className="dashboard-nav-badge">{flashcardStats.needsReview}</em>
+                <em className="dashboard-nav-badge">{flashcardStats.needsReview > 9 ? '9+' : flashcardStats.needsReview}</em>
               ) : view.key === 'documents' && processingDocuments.some((document) => ['queued', 'processing'].includes(document.analysisStatus)) ? (
                 <em className="dashboard-nav-badge processing">{processingDocuments.filter((document) => ['queued', 'processing'].includes(document.analysisStatus)).length}</em>
               ) : view.key === 'overview' && unreadNotifications > 0 ? (
-                <em className="dashboard-nav-badge">{unreadNotifications}</em>
+                <em className="dashboard-nav-badge">{unreadNotifications > 9 ? '9+' : unreadNotifications}</em>
               ) : null}
             </button>
           )
@@ -7467,11 +7499,20 @@ function UserDashboardPage({
                   : (<><RefreshCw size={15} /> Ripassa tutti gli errori</>)}
               </button>
             ) : null}
-            <span className={`dashboard-live-badge ${flashcardDataIsLive ? 'live' : ''}`}>
+            <span
+              className={`dashboard-live-badge ${flashcardDataIsLive ? 'live' : ''}`}
+              title={flashcardDataIsLive
+                ? 'Progressi sincronizzati con il tuo account: li ritrovi su ogni dispositivo.'
+                : flashcardDashboard?.source === 'local'
+                  ? 'Progressi salvati solo su questo dispositivo/browser: cambiando dispositivo o pulendo i dati di navigazione andranno persi.'
+                  : flashcardDashboard?.source === 'demo'
+                    ? 'Dati dimostrativi: accedi con un account reale per salvare i tuoi progressi.'
+                    : 'Nessun progresso registrato finora.'}
+            >
               {flashcardDataIsLive
                 ? 'Live'
                 : flashcardDashboard?.source === 'local'
-                  ? 'Locale'
+                  ? 'Solo questo dispositivo'
                   : flashcardDashboard?.source === 'demo'
                     ? 'Demo'
                     : 'Nessun dato'}

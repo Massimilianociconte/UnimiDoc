@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// Prerender SEO post-build: genera pagine statiche per /corsi e /corsi/:slug
-// (title/description/canonical/OG/JSON-LD + piano di studi renderizzato dentro
-// #root, sostituito dall'app al mount) e rigenera dist/sitemap.xml con lastmod
-// corrente. I dati arrivano dalle tabelle pubbliche Supabase a build time, così
-// i crawler senza JavaScript vedono contenuto reale e sempre aggiornato.
+// Prerender SEO post-build: genera pagine statiche per /corsi, /corsi/:slug e
+// /appunti/:materia/:titolo (title/description/canonical/OG/JSON-LD + contenuto
+// renderizzato dentro #root, sostituito dall'app al mount) e rigenera
+// dist/sitemap.xml con lastmod corrente. I dati arrivano dalle tabelle/viste
+// pubbliche Supabase a build time, così i crawler senza JavaScript vedono
+// contenuto reale e sempre aggiornato.
 //
 // Richiede VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY (presenti nel build
 // Netlify; in locale letti anche da .env). Senza credenziali il prerender
@@ -64,14 +65,29 @@ async function fetchAll(table, select, order) {
 const esc = (value) =>
   String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
+// Stessa slugify di src/lib/seo.ts: gli URL prerenderizzati devono coincidere
+// con quelli generati dal client (documentPath).
+const slugify = (value) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
 console.log('[prerender] carico catalogo da Supabase…')
-const [programs, courses, teachers, professors] = await Promise.all([
-  fetchAll('degree_programs', 'slug,name,classe,area,unimi_path,interateneo,catalog_ready,sort_order', 'sort_order.asc'),
+const [programs, courses, teachers, professors, documents] = await Promise.all([
+  fetchAll('degree_programs', 'slug,name,classe,area,unimi_path,interateneo,catalog_ready,degree_type,sort_order', 'sort_order.asc'),
   fetchAll('degree_courses', 'id,degree_slug,name,curriculum,year_number,year_label,cfu,ssd,language,sort_order', 'degree_slug.asc,year_number.asc,sort_order.asc'),
   fetchAll('degree_course_teachers', 'course_id,professor_id,role'),
   fetchAll('professors', 'id,full_name'),
+  fetchAll(
+    'public_document_catalog',
+    'id,title,course_name,professor,academic_year,page_count,language,description,exam_type,price_credits,created_at,updated_at',
+    'created_at.desc',
+  ),
 ])
-console.log(`[prerender] ${programs.length} corsi, ${courses.length} insegnamenti, ${professors.length} docenti`)
+console.log(`[prerender] ${programs.length} corsi, ${courses.length} insegnamenti, ${professors.length} docenti, ${documents.length} documenti`)
 
 const professorById = new Map(professors.map((p) => [p.id, p.full_name]))
 const teachersByCourse = new Map()
@@ -120,12 +136,19 @@ function renderPage({ path, title, description, jsonLd, bodyHtml }) {
   writeFileSync(join(outDir, 'index.html'), html)
 }
 
+// Come degreeTypeOf in src/degreePrograms.ts: default 'triennale'.
+const isCicloUnico = (program) => program.degree_type === 'ciclo-unico'
+const degreeLevelLower = (program) =>
+  isCicloUnico(program) ? 'laurea magistrale a ciclo unico' : 'laurea triennale'
+const degreeLevelLabel = (program) =>
+  isCicloUnico(program) ? 'Laurea magistrale a ciclo unico' : 'Laurea triennale'
+
 function degreeDescription(program) {
   const detail = program.catalog_ready
     ? 'Catalogo completo di materie e docenti del piano di studi, con dispense, schemi ed esercizi verificati dalla community.'
     : 'Carica e trova dispense, riassunti, schemi ed esercizi condivisi dagli studenti del corso, verificati prima della pubblicazione.'
   return (
-    `Appunti per ${program.name} (classe ${program.classe}), laurea triennale` +
+    `Appunti per ${program.name} (classe ${program.classe}), ${degreeLevelLower(program)}` +
     `${program.interateneo ? ` interateneo (${program.interateneo})` : ''} dell'Università degli Studi di Milano. ${detail}`
   ).slice(0, 300)
 }
@@ -163,7 +186,7 @@ function degreeBody(program) {
 <main>
   <nav><a href="/">UnimiDoc</a> › <a href="/corsi">Corsi di laurea</a> › ${esc(program.name)}</nav>
   <h1>Appunti per ${esc(program.name)}</h1>
-  <p>Laurea triennale, classe ${esc(program.classe)}${program.interateneo ? ` · interateneo con ${esc(program.interateneo)}` : ''} — Università degli Studi di Milano.
+  <p>${degreeLevelLabel(program)}, classe ${esc(program.classe)}${program.interateneo ? ` · interateneo con ${esc(program.interateneo)}` : ''} — Università degli Studi di Milano.
      Dispense, riassunti, schemi ed esercizi caricati dagli studenti e verificati prima della pubblicazione.</p>
   <p><a href="/upload">Carica appunti</a> · <a href="/app">Esplora i materiali</a></p>
   ${plan ? `<h2>Materie e docenti del corso</h2>${plan}` : `<p>Piano di studi presso l'ateneo di riferimento: <a href="https://www.unimi.it${esc(program.unimi_path)}" rel="noreferrer">unimi.it</a>.</p>`}
@@ -187,7 +210,7 @@ for (const program of programs) {
         courseCode: program.classe,
         description: degreeDescription(program),
         inLanguage: 'it',
-        educationalLevel: 'Laurea triennale',
+        educationalLevel: degreeLevelLabel(program),
         provider: {
           '@type': 'CollegeOrUniversity',
           name: 'Università degli Studi di Milano',
@@ -207,8 +230,8 @@ for (const program of programs) {
   list.push(program)
   areas.set(program.area, list)
 }
-let directory = '<main><h1>I corsi di laurea triennale della Statale di Milano</h1>'
-directory += `<p>${programs.length} corsi triennali attivi. Scienze biologiche e altri ${programs.filter((p) => p.catalog_ready).length - 1} corsi hanno il catalogo completo di materie e docenti.</p>`
+let directory = '<main><h1>I corsi di laurea della Statale di Milano</h1>'
+directory += `<p>${programs.length} corsi di laurea triennale e magistrale a ciclo unico attivi. Scienze biologiche e altri ${programs.filter((p) => p.catalog_ready).length - 1} corsi hanno il catalogo completo di materie e docenti.</p>`
 for (const [area, list] of areas) {
   directory += `<section><h2>${esc(area)}</h2><ul>`
   for (const program of list) {
@@ -220,14 +243,14 @@ directory += '</main>'
 
 renderPage({
   path: '/corsi',
-  title: 'Corsi di laurea triennale della Statale di Milano - UnimiDoc',
+  title: 'Corsi di laurea triennale e a ciclo unico della Statale di Milano - UnimiDoc',
   description:
-    'Tutti i corsi di laurea triennale dell’Università degli Studi di Milano su UnimiDoc: trova o carica appunti per il tuo corso, con materie e docenti del piano di studi.',
+    'Tutti i corsi di laurea triennale e magistrale a ciclo unico dell’Università degli Studi di Milano su UnimiDoc: trova o carica appunti per il tuo corso, con materie e docenti del piano di studi.',
   jsonLd: [
     {
       '@context': 'https://schema.org',
       '@type': 'ItemList',
-      name: 'Corsi di laurea triennale — Università degli Studi di Milano',
+      name: 'Corsi di laurea triennale e a ciclo unico — Università degli Studi di Milano',
       url: `${ORIGIN}/corsi`,
       numberOfItems: programs.length,
       itemListElement: programs.map((program, index) => ({
@@ -241,15 +264,86 @@ renderPage({
   bodyHtml: directory,
 })
 
+// --- /appunti/:materia/:titolo ------------------------------------------------
+// Stessi URL di documentPath() in src/lib/seo.ts. In caso di slug duplicati
+// vince il documento più recente già incontrato (ordine created_at.desc),
+// coerente con la risoluzione client di findDocumentByPath.
+const documentPages = new Map()
+for (const doc of documents) {
+  const subjectSlug = slugify(doc.course_name)
+  const titleSlug = slugify(doc.title)
+  if (!subjectSlug || !titleSlug) continue
+  const docPath = `/appunti/${subjectSlug}/${titleSlug}`
+  if (!documentPages.has(docPath)) documentPages.set(docPath, doc)
+}
+
+function documentDescription(doc) {
+  const base = (doc.description ?? '').trim()
+  if (base) return base.slice(0, 300)
+  return `${doc.title} — appunti di ${doc.course_name}${doc.professor ? ` (prof. ${doc.professor})` : ''} per l'Università degli Studi di Milano, verificati prima della pubblicazione su UnimiDoc.`.slice(0, 300)
+}
+
+for (const [docPath, doc] of documentPages) {
+  const free = (doc.price_credits ?? 0) === 0
+  const meta = [
+    doc.course_name,
+    doc.professor ? `Prof. ${doc.professor}` : null,
+    doc.academic_year,
+    doc.page_count ? `${doc.page_count} pagine` : null,
+    doc.exam_type,
+    free ? 'Gratuito' : `${doc.price_credits} crediti`,
+  ].filter(Boolean)
+  renderPage({
+    path: docPath,
+    title: `${doc.title} · ${doc.course_name}${doc.professor ? ` (${doc.professor})` : ''} | Appunti UniMi`,
+    description: documentDescription(doc),
+    jsonLd: [
+      {
+        '@context': 'https://schema.org',
+        '@type': 'LearningResource',
+        '@id': `${ORIGIN}${docPath}`,
+        url: `${ORIGIN}${docPath}`,
+        name: doc.title,
+        description: documentDescription(doc),
+        inLanguage: doc.language === 'Inglese' ? 'en' : 'it',
+        ...(doc.page_count ? { numberOfPages: doc.page_count } : {}),
+        about: [{ '@type': 'Thing', name: doc.course_name }],
+        isAccessibleForFree: free,
+        dateModified: (doc.updated_at ?? doc.created_at ?? '').slice(0, 10) || undefined,
+        provider: { '@type': 'Organization', name: 'UnimiDoc', url: ORIGIN },
+      },
+      {
+        '@context': 'https://schema.org',
+        '@type': 'BreadcrumbList',
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: 'UnimiDoc', item: `${ORIGIN}/` },
+          { '@type': 'ListItem', position: 2, name: 'Appunti', item: `${ORIGIN}/app` },
+          { '@type': 'ListItem', position: 3, name: doc.course_name, item: `${ORIGIN}/app?materia=${encodeURIComponent(doc.course_name)}` },
+          { '@type': 'ListItem', position: 4, name: doc.title, item: `${ORIGIN}${docPath}` },
+        ],
+      },
+    ],
+    bodyHtml: `
+<main>
+  <nav><a href="/">UnimiDoc</a> › <a href="/app">Appunti</a> › ${esc(doc.course_name)} › ${esc(doc.title)}</nav>
+  <h1>${esc(doc.title)}</h1>
+  <p>${meta.map((entry) => esc(entry)).join(' · ')}</p>
+  <p>${esc(documentDescription(doc))}</p>
+  <p><a href="/app">Esplora tutti i materiali</a> · <a href="/upload">Carica i tuoi appunti</a></p>
+</main>`,
+  })
+}
+
 // --- sitemap.xml -------------------------------------------------------------
 const today = new Date().toISOString().slice(0, 10)
+// /login escluso: pagina di servizio senza valore di ricerca (soft-404 per i
+// crawler senza sessione).
 const staticRoutes = [
   { path: '/', priority: '1.0', changefreq: 'weekly' },
   { path: '/app', priority: '0.9', changefreq: 'daily' },
   { path: '/corsi', priority: '0.8', changefreq: 'monthly' },
   { path: '/premium', priority: '0.8', changefreq: 'monthly' },
   { path: '/upload', priority: '0.7', changefreq: 'monthly' },
-  { path: '/login', priority: '0.5', changefreq: 'monthly' },
   { path: '/privacy', priority: '0.4', changefreq: 'monthly' },
   { path: '/termini', priority: '0.4', changefreq: 'monthly' },
   { path: '/cookie', priority: '0.4', changefreq: 'monthly' },
@@ -269,10 +363,14 @@ const urls = [
     (program) =>
       `  <url><loc>${ORIGIN}/corsi/${program.slug}</loc><lastmod>${today}</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>`,
   ),
+  ...[...documentPages.entries()].map(([docPath, doc]) => {
+    const lastmod = (doc.updated_at ?? doc.created_at ?? '').slice(0, 10) || today
+    return `  <url><loc>${ORIGIN}${docPath}</loc><lastmod>${lastmod}</lastmod><changefreq>weekly</changefreq><priority>0.6</priority></url>`
+  }),
 ]
 writeFileSync(
   join(DIST, 'sitemap.xml'),
   `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>\n`,
 )
 
-console.log(`[prerender] generate ${programs.length + 1} pagine statiche + sitemap (${urls.length} URL).`)
+console.log(`[prerender] generate ${programs.length + documentPages.size + 1} pagine statiche + sitemap (${urls.length} URL).`)

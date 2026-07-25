@@ -68,9 +68,13 @@ Deno.serve(async (req: Request) => {
     const { error: removeError } = await admin.storage.from(row.bucket).remove([row.path])
     if (removeError) {
       failed += 1
+      // Compare-and-set on attempts: a concurrent drainer that already bumped
+      // the row makes this a no-op instead of overwriting its increment (the
+      // plain read-modify-write undercounted attempts under concurrency).
       await admin.from('storage_cleanup_queue')
         .update({ attempts: row.attempts + 1, last_error: removeError.message.slice(0, 500) })
         .eq('id', row.id)
+        .eq('attempts', row.attempts)
     } else {
       removed += 1
       await admin.from('storage_cleanup_queue')

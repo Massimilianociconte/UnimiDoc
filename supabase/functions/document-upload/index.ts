@@ -294,7 +294,20 @@ async function cancelUpload(admin: any, userId: string, body: Record<string, unk
       // client could upload any bytes. A reused draft may already own an
       // uploaded object, so preserve it for a later signed-URL retry.
       if (!reusedDraft) {
-        await admin.from('documents').delete().eq('id', documentId).eq('owner_id', userId)
+        const { error: rollbackError } = await admin
+          .from('documents')
+          .delete()
+          .eq('id', documentId)
+          .eq('owner_id', userId)
+        if (rollbackError) {
+          // The stranded draft keeps its unique hash and blocks re-upload of
+          // the same file: surface it for ops instead of failing silently.
+          console.error('[document-upload] rollback draft failed', {
+            documentId,
+            ownerId: userId,
+            error: rollbackError.message,
+          })
+        }
       }
       throw errors.badRequest(signedError?.message ?? 'Signed upload URL non creato.')
     }

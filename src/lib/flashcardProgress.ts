@@ -191,12 +191,31 @@ function loadLocalStore(userId: string): LocalStore {
   }
 }
 
+let localPersistenceFailed = false
+let localPersistenceWarned = false
+
+/**
+ * True when the last localStorage write was rejected (private mode, quota…):
+ * the study session keeps working in memory but progress will not survive
+ * a reload, so the UI must tell the user instead of failing silently.
+ */
+export function hasFlashcardLocalPersistenceFailure(): boolean {
+  return localPersistenceFailed
+}
+
 function saveLocalStore(userId: string, store: LocalStore): void {
   if (typeof window === 'undefined') return
   try {
     window.localStorage.setItem(storageKey(userId), JSON.stringify(store))
-  } catch {
-    /* Keep the active study session usable even in privacy/quota failures. */
+    localPersistenceFailed = false
+  } catch (error) {
+    // Keep the active study session usable even in privacy/quota failures,
+    // but record the loss so the UI can warn the user.
+    localPersistenceFailed = true
+    if (!localPersistenceWarned) {
+      localPersistenceWarned = true
+      console.warn('[flashcardProgress] localStorage non disponibile: i progressi locali non verranno conservati.', error)
+    }
   }
 }
 

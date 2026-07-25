@@ -56,10 +56,14 @@ export async function drainStorageCleanupQueue(
     const { error: removeError } = await supabase.storage.from(row.bucket).remove([row.path])
     if (removeError) {
       result.failed += 1
+      // Compare-and-set on attempts: a concurrent drainer (Edge Function cron
+      // vs CLI) that already bumped the row makes this a no-op instead of
+      // overwriting its increment.
       await supabase
         .from('storage_cleanup_queue')
         .update({ attempts: row.attempts + 1, last_error: removeError.message.slice(0, 500) })
         .eq('id', row.id)
+        .eq('attempts', row.attempts)
       log('storage_gc_remove_failed', { id: row.id, bucket: row.bucket, error: removeError.message })
     } else {
       result.removed += 1

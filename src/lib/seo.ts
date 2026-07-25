@@ -132,13 +132,17 @@ export function documentJsonLd(document: DocumentItem, url: string): Record<stri
     }
   }
 
-  if (document.quality > 0) {
+  // AggregateRating solo da recensioni reali (1–5): fabbricarlo dal punteggio
+  // qualità con ratingCount = download viola le linee guida sui rich result.
+  const reviewCount = document.serverRanking?.reviewCount ?? 0
+  const reviewAvg = document.serverRanking?.reviewAvg
+  if (reviewCount > 0 && typeof reviewAvg === 'number' && reviewAvg > 0) {
     jsonLd.aggregateRating = {
       '@type': 'AggregateRating',
-      ratingValue: document.quality,
-      bestRating: 10,
-      worstRating: 0,
-      ratingCount: Math.max(document.downloads, 1),
+      ratingValue: Math.round(reviewAvg * 10) / 10,
+      bestRating: 5,
+      worstRating: 1,
+      ratingCount: reviewCount,
     }
   }
 

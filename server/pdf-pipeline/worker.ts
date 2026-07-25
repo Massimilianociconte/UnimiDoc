@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
+import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -98,6 +99,28 @@ function technicalDetails(error: unknown): Record<string, unknown> {
   return { message: String(error).slice(0, 1000) }
 }
 
+/**
+ * Retries a terminal queue RPC (complete/fail) across transient network/RPC
+ * blips with the same policy as heartbeat: 3 attempts, linear backoff. A
+ * definitive RPC response (owned / not owned, resulting status) never retries;
+ * only thrown errors do. Without this, a single blip on complete() failed a
+ * fully-processed job and forced a full reprocess on lease expiry.
+ */
+async function retryQueueCall<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      lastError = error
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)))
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+}
+
 async function processJob(runtime: WorkerRuntime, job: ClaimedPdfJob): Promise<void> {
   const startedAt = Date.now()
   const jobLogger = createJobLogger(job.jobId, job.runId, job.documentId, {
@@ -175,7 +198,7 @@ async function processJob(runtime: WorkerRuntime, job: ClaimedPdfJob): Promise<v
 
     if (jobAbort.signal.aborted || lostLease) throw lostLeaseError()
 
-    const completed = await runtime.queue.complete(job, execution.result, execution.skipped === true)
+    const completed = await retryQueueCall(() => runtime.queue.complete(job, execution.result, execution.skipped === true))
     if (!completed) {
       lostLease = true
       jobLogger.leaseContention('complete_failed')
@@ -199,13 +222,13 @@ async function processJob(runtime: WorkerRuntime, job: ClaimedPdfJob): Promise<v
 
     let resultingStatus = 'fail_rpc_unavailable'
     try {
-      resultingStatus = await runtime.queue.fail(job, {
+      resultingStatus = await retryQueueCall(() => runtime.queue.fail(job, {
         code: normalized.code,
         publicMessage: normalized.publicMessage,
         retryable: normalized.retryable,
         technicalError: technicalDetails(error),
         metrics: { durationMs: Date.now() - startedAt, lastProgress, lastStage },
-      })
+      }))
     } catch (failureUpdateError) {
       jobLogger.error('pdf_job_failure_update_failed', failureUpdateError)
     }
@@ -252,9 +275,38 @@ async function workerSlot(runtime: WorkerRuntime, slot: number, once: boolean): 
   }
 }
 
+/**
+ * Removes `job-*` temp dirs left behind by a previous crash/OOM kill. Runs
+ * once at startup, before any slot claims work, so it can never race an
+ * in-flight job of this process (the temp root is container-local).
+ */
+async function sweepOrphanedJobDirs(tempRoot: string): Promise<void> {
+  let entries: Dirent[]
+  try {
+    entries = await readdir(tempRoot, { withFileTypes: true })
+  } catch {
+    return
+  }
+  let removed = 0
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('job-')) continue
+    try {
+      await rm(path.join(tempRoot, entry.name), { recursive: true, force: true })
+      removed += 1
+    } catch (error) {
+      log('pdf_worker_tmp_sweep_failed', {
+        dir: entry.name,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+  if (removed > 0) log('pdf_worker_tmp_swept', { removed })
+}
+
 export async function runPdfWorker(input: { once?: boolean; env?: NodeJS.ProcessEnv } = {}): Promise<void> {
   const config = loadWorkerConfig(input.env)
   await mkdir(config.tempRoot, { recursive: true, mode: 0o700 })
+  await sweepOrphanedJobDirs(config.tempRoot)
   const shutdownController = new AbortController()
   const shutdown = (signal: string) => {
     if (!shutdownController.signal.aborted) {

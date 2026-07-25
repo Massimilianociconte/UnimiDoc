@@ -6260,6 +6260,41 @@ button {
   white-space: nowrap;
 }
 
+.study-local-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: start;
+  margin-top: 2px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fdf3e2;
+  color: #92600a;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.study-persistence-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border: 1px solid #f3d9a4;
+  border-radius: 10px;
+  background: #fdf3e2;
+  color: #92600a;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.study-persistence-warning svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
 .study-top-tabs {
   display: flex;
   align-items: center;
@@ -7491,7 +7526,7 @@ button {
   grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.55fr);
   gap: 30px;
   align-items: center;
-  border-radius: 8px;
+  border-radius: 18px;
   padding: 30px 36px;
   scroll-margin-top: 90px;
   background:
@@ -7533,7 +7568,7 @@ button {
   width: 100%;
   aspect-ratio: 16 / 9;
   border: 1px solid rgba(22, 104, 69, 0.1);
-  border-radius: 8px;
+  border-radius: 14px;
   object-fit: cover;
   box-shadow: var(--shadow-soft);
 }
@@ -7600,6 +7635,10 @@ button {
 .dashboard-nav-tab:hover {
   background: #f5f8f6;
   transform: translateY(-1px);
+}
+
+.dashboard-nav-tab:active {
+  transform: none;
 }
 
 .dashboard-nav-icon {
@@ -7680,6 +7719,20 @@ button {
   animation: dashboard-view-in 200ms ease;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-view {
+    animation: none;
+  }
+
+  .dashboard-nav-tab,
+  .dashboard-section-head button,
+  .dashboard-focus-card > button,
+  button.dashboard-stat,
+  .mistake-review-card {
+    transition: none;
+  }
+}
+
 @keyframes dashboard-view-in {
   from {
     opacity: 0;
@@ -7752,6 +7805,8 @@ button {
     padding: 8px 20px;
     overflow-x: auto;
     scrollbar-width: none;
+    scroll-snap-type: x proximity;
+    scroll-padding-inline: 20px;
   }
 
   .dashboard-nav::-webkit-scrollbar {
@@ -7761,6 +7816,7 @@ button {
   .dashboard-nav-tab {
     flex: 0 0 auto;
     padding: 8px 12px;
+    scroll-snap-align: start;
   }
 
   .dashboard-nav-icon {
@@ -7934,6 +7990,7 @@ button.dashboard-stat:hover {
   line-height: 1;
   font-weight: 900;
   color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
 }
 
 .dashboard-stat-label {
@@ -8031,15 +8088,37 @@ button.dashboard-stat:hover {
 .dashboard-live-badge {
   display: inline-flex;
   align-items: center;
+  gap: 5px;
   margin-left: 8px;
-  padding: 2px 8px;
+  padding: 2px 9px;
+  border: 1px solid #dde3df;
   border-radius: 999px;
-  background: #e7f6ec;
-  color: #0f5132;
+  background: #f4f6f5;
+  color: #55645c;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
   vertical-align: middle;
+  white-space: nowrap;
+}
+
+.dashboard-live-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #aab4ae;
+}
+
+.dashboard-live-badge.live {
+  border-color: #cdeeda;
+  background: #e7f6ec;
+  color: #0f5132;
+}
+
+.dashboard-live-badge.live::before {
+  background: #1fa06a;
+  box-shadow: 0 0 0 3px rgba(31, 160, 106, 0.16);
 }
 
 .dashboard-section p,
@@ -8070,6 +8149,31 @@ button.dashboard-stat:hover {
   background: #fff;
   font-weight: 850;
   cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.dashboard-section-head button:hover {
+  border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+  background: #f2faf6;
+  transform: translateY(-1px);
+}
+
+.dashboard-section-head button:active {
+  transform: none;
+}
+
+/* Focus keyboard uniforme su tutti i controlli dell'area personale: senza
+   questo anello i tab-user perdono la posizione tra card e pulsanti-card. */
+.dashboard-nav-tab:focus-visible,
+.dashboard-section-head button:focus-visible,
+.dashboard-focus-card > button:focus-visible,
+.dashboard-state-banner > button:focus-visible,
+button.dashboard-stat:focus-visible,
+.mistake-review-card:focus-visible,
+.review-subject-chip:focus-visible,
+.review-start-all:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  outline-offset: 2px;
 }
 
 .flashcard-command-center {
@@ -8098,6 +8202,7 @@ button.dashboard-stat:hover {
   font-size: 25px;
   line-height: 1;
   font-weight: 950;
+  font-variant-numeric: tabular-nums;
 }
 
 .flashcard-kpi-grid span {
@@ -8799,9 +8904,11 @@ button.dashboard-stat:hover {
 
 .dashboard-empty {
   border: 1px dashed var(--border);
-  border-radius: 8px;
-  padding: 14px;
+  border-radius: 12px;
+  padding: 18px 16px;
   background: #fbfdfc;
+  color: var(--muted);
+  text-align: center;
 }
 
 .dashboard-deck-grid,
@@ -12447,6 +12554,11 @@ button.dashboard-stat:hover {
   background: transparent;
   font-weight: 800;
   cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.dashboard-state-banner > button:hover {
+  background: rgba(255, 255, 255, 0.65);
 }
 
 .dashboard-state-banner.error {
@@ -12551,6 +12663,21 @@ button.dashboard-stat:hover {
   font-weight: 850;
   white-space: nowrap;
   cursor: pointer;
+  transition: filter 140ms ease, transform 140ms ease;
+}
+
+.dashboard-focus-card > button:hover,
+.dashboard-empty-state > button:hover,
+.dashboard-creator-hero > button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+
+.dashboard-focus-card > button:active,
+.dashboard-empty-state > button:active,
+.dashboard-creator-hero > button:active {
+  transform: none;
+  filter: brightness(0.96);
 }
 
 .dashboard-focus-card.review > button {

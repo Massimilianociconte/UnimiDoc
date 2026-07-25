@@ -9,8 +9,11 @@ import {
   type BillingConfig,
   type BillingStatus,
 } from '../lib/billingClient'
+import { CREDIT_EUR_VALUE, MIN_PAYOUT_EUR } from '../lib/creditPricing'
 
-const MIN_PAYOUT_CREDITS = 250
+// Derivato dal modello economico (€25 / €0.10 = 250): resta allineato se le
+// costanti di pricing cambiano, invece di divergere da un valore hardcoded.
+const MIN_PAYOUT_CREDITS = Math.round(MIN_PAYOUT_EUR / CREDIT_EUR_VALUE)
 
 export function SellerPayoutPanel() {
   const [config, setConfig] = useState<BillingConfig | null>(null)

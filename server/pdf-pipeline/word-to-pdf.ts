@@ -133,7 +133,17 @@ async function validatePdfOutput(filePath: string) {
 
   if (header.toString('utf8') !== '%PDF-') throw new Error('WORD_TO_PDF_INVALID_OUTPUT')
 
-  await execFile('qpdf', ['--check', filePath]).catch(() => undefined)
+  // qpdf exit codes: 0 = clean, 3 = warnings only (acceptable output from
+  // LibreOffice), 2 = structural errors. Anything but 0/3 means the PDF is
+  // broken and must not enter the pipeline. A missing qpdf binary (dev
+  // machines without it) skips the deep check instead of rejecting the file.
+  try {
+    await execFile('qpdf', ['--check', filePath])
+  } catch (error) {
+    const code = (error as { code?: number | string } | undefined)?.code
+    if (code === 'ENOENT') return
+    if (code !== 3) throw new Error('WORD_TO_PDF_INVALID_OUTPUT')
+  }
 }
 
 async function sha256File(filePath: string) {
