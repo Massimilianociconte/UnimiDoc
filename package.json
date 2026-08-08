@@ -20,7 +20,10 @@
     "worker:pdf": "tsx server/pdf-pipeline/worker.ts",
     "worker:pdf:once": "tsx server/pdf-pipeline/worker.ts --once",
     "worker:pdf:reconcile": "tsx scripts/reconcile-pdf-jobs.ts",
-    "gc:storage": "tsx scripts/gc-storage.ts"
+    "gc:storage": "tsx scripts/gc-storage.ts",
+    "deploy": "npm run build && wrangler deploy",
+    "deploy:pages": "npm run build && wrangler pages deploy dist --project-name=unimidoc",
+    "preview:worker": "wrangler dev"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.0",
@@ -43,6 +46,7 @@
     "playwright": "^1.61.1",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
-    "vitest": "^3.2.6"
+    "vitest": "^3.2.6",
+    "wrangler": "^3.114.0"
   }
 }
